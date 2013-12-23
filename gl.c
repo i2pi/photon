@@ -56,7 +56,7 @@ void keyPressed(unsigned char key, int x, int y)
     }
 }
 
-void sphere (float x, float y, float z, float r, int segments) {
+void gl_sphere (float x, float y, float z, float r, int segments) {
 	vectorT *p_circle;
 	vectorT *circle;
 	int		i, j;
@@ -101,7 +101,7 @@ void sphere (float x, float y, float z, float r, int segments) {
 	glEnd();
 }
 
-void cube(float x, float y, float z, float d)
+void gl_cube(float x, float y, float z, float d)
 {
   glBegin(GL_QUADS);                // start drawing the cube.
 
@@ -166,9 +166,9 @@ void	scene(void)
 		z = (z - 1.5) * 5.0;
 
 		if ((i + j) % 2) {
-			cube(x, y, z, r);
+			gl_cube(x, y, z, r);
 		} else {
-			sphere(x, y, z, r, 100);
+			gl_sphere(x, y, z, r, 100);
 		}
 	}
 	

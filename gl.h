@@ -10,6 +10,8 @@
 	#include <GL/glu.h>
 #endif
 
+#include "tracer.h"
+
 typedef struct gui_stateT
 {
     int window;
@@ -26,6 +28,7 @@ gui_stateT  gui_state;
 
 
 void init_gl (int Width, int Height, int argc, char **argv);
-
+void gl_sphere (float x, float y, float z, float r, int segments);
+void gl_cube(float x, float y, float z, float d);
 
 #endif

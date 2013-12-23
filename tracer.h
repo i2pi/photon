@@ -17,7 +17,8 @@ typedef struct {
 
 	// Methods:
 	// - ray-primitive intersection 
-	// - gl draw 
+
+	void	(*gl_draw)(float *parameter);
 	
 } primitiveT;
 

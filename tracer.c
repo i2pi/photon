@@ -5,11 +5,13 @@
 
 #include "tracer.h"
 
+#include "gl.h"
+
 extern primitiveT primitive[64];
 extern int         primitives;
 
 
-primitiveT	*create_primitive(char *name, int parameters, ...) {
+primitiveT	*create_primitive(char *name, void (*gl_draw)(float *p), int parameters, ...) {
 	va_list	ap;
 	int		i;
 	
@@ -22,6 +24,7 @@ primitiveT	*create_primitive(char *name, int parameters, ...) {
 	}
 
 	p->name = strdup(name);
+	p->gl_draw = gl_draw;
 	p->parameters = parameters;
 
 	p->parameter_name = (char **) malloc (sizeof(char *) * parameters);
@@ -36,7 +39,15 @@ primitiveT	*create_primitive(char *name, int parameters, ...) {
 	return (p);
 }
 
+void cube_gl_draw(float *parameter) {	
+	gl_cube(parameter[0], parameter[1], parameter[3], parameter[4]);
+}
+
+void sphere_gl_draw(float *parameter) {
+	gl_sphere(parameter[0], parameter[1], parameter[3], parameter[4], 100);
+}
+
 void init_primitives (void) {
-	create_primitive("cube", 4, "x", "y", "z", "d");
-	create_primitive("sphere", 4, "x", "y", "z", "r");
+	create_primitive("cube", cube_gl_draw, 4, "x", "y", "z", "d");
+	create_primitive("sphere", sphere_gl_draw, 4, "x", "y", "z", "r");
 }
