@@ -25,8 +25,7 @@ typedef struct gui_stateT
 gui_stateT  gui_state;
 
 
-int start_gl (int argc, char **argv, void (*draw_scene)(void));
-void print (float x, float y, char *text);
+void init_gl (int Width, int Height, int argc, char **argv);
 
 
 #endif

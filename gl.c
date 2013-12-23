@@ -24,25 +24,6 @@ void set_camera (void) {
 	glMatrixMode(GL_MODELVIEW);
 }
 
-void InitGL(int Width, int Height)	        
-{
-	glEnable(GL_TEXTURE_2D);
-	glClearColor(1,1,1,1);
-	glClearDepth(1);				
-	glEnable(GL_LINE_SMOOTH);
-	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST); 
-	glDepthFunc(GL_LESS);			   
-	glEnable(GL_DEPTH_TEST);		  
-	glShadeModel(GL_SMOOTH);		
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-	gui_state.w = Width;
-	gui_state.h = Height;
-
-	set_camera();
-}
-
 void ReSizeGLScene(int Width, int Height)
 {
 	if (Height==0)	Height=1;
@@ -194,25 +175,33 @@ void	scene(void)
 	glutSwapBuffers();	
 }
 
-int main(int argc, char **argv)
-{  
-	int W = 256, H = 256;
+void init_gl(int Width, int Height, int argc, char **argv)	        
+{
+	glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);
 
-	glutInit(&argc, argv);  
-	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);
+    glutInitWindowSize(Width, Height);
 
-	glutInitWindowSize(W, H);  
+    gui_state.window = glutCreateWindow("i2photon");
+    glutDisplayFunc(scene);
 
-	gui_state.window = glutCreateWindow("i2photon");
-	glutDisplayFunc(scene);  
+    glutIdleFunc(scene);
+    glutReshapeFunc(&ReSizeGLScene);
+    glutKeyboardFunc(&keyPressed);
 
-	glutIdleFunc(scene);
-	glutReshapeFunc(&ReSizeGLScene);
-	glutKeyboardFunc(&keyPressed);
+	glEnable(GL_TEXTURE_2D);
+	glClearColor(1,1,1,1);
+	glClearDepth(1);				
+	glEnable(GL_LINE_SMOOTH);
+	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST); 
+	glDepthFunc(GL_LESS);			   
+	glEnable(GL_DEPTH_TEST);		  
+	glShadeModel(GL_SMOOTH);		
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	InitGL(W, H);
-  
-	glutMainLoop();  
+	gui_state.w = Width;
+	gui_state.h = Height;
 
-	return (1);
+	set_camera();
 }
