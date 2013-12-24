@@ -64,9 +64,12 @@ void	render_scene(void)
 
 	for (i=0; i<SCENE->objects; i++) {
 		objectT *obj = SCENE->object[i];
-		glColor4f (1, 0, 0, 1);
-		for (j=0; j<obj->primitives; j++) {
-			obj->primitive[j]->gl_draw(obj->parameter[j]);
+
+		for (j=0; j<obj->surfaces; j++) {
+			surfaceT *surf = &obj->surface[j];
+
+			glColor4fv (surf->color);
+			surf->primitive->gl_draw(surf->parameter[j]);
 		}
 	}
 
@@ -81,6 +84,7 @@ void	render_scene(void)
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
 
 	glBindTexture(GL_TEXTURE_2D, SCREEN_TEXTURE_ID);
+	glColor4f(0,0,0,1);
 	glBegin(GL_QUADS);
 	glTexCoord2f(0,0);
 	glVertex2f  (-1,-1);
@@ -115,8 +119,16 @@ sceneT	*setup_scene (void) {
 		z = (z - 1.5) * 5.0;
 		if ((i + j) % 2) {
 			obj = create_cube_object(x, y, z, r);
+			obj->surface[0].color[0] = 1.0;
+			obj->surface[0].color[1] = 0.0;
+			obj->surface[0].color[2] = 0.0;
+			obj->surface[0].color[3] = 1.0;
 		} else {
 			obj = create_sphere_object(x, y, z, r);
+			obj->surface[0].color[0] = 0.0;
+			obj->surface[0].color[1] = 1.0;
+			obj->surface[0].color[2] = 0.0;
+			obj->surface[0].color[3] = 1.0;
 		}
 		add_object_to_scene (s, obj);
 	}

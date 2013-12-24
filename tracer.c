@@ -58,47 +58,51 @@ void sphere_gl_draw(float *parameter) {
 	gl_sphere(parameter[0], parameter[1], parameter[2], parameter[3], 100);
 }
 
-objectT *create_object (int primitives) {
+objectT *create_object (int surfaces) {
 	objectT *obj;
 
 	obj = (objectT *) malloc (sizeof(objectT));
 	
-	obj->primitives = primitives;
-	obj->primitive = (primitiveT **) malloc (sizeof (primitiveT *) * obj->primitives);
-	
-	obj->parameter = (float **) malloc (sizeof(float *) * obj->primitives);
+	obj->surfaces = surfaces;
+	obj->surface = (surfaceT *) malloc (sizeof (surfaceT) * obj->surfaces);
+
+	obj->surface->parameter = (float **) malloc (sizeof(float *) * obj->surfaces);
 
 	return (obj);
 }
 
 objectT *create_cube_object (float x, float y, float z, float d) {
 	objectT *obj;
+	surfaceT *surf;	
 
 	obj = create_object(1);
+
+	surf = &obj->surface[0];	
+	surf->primitive = CUBE;
 	
-	obj->primitive[0] = CUBE;
-	
-	obj->parameter[0] = (float *) malloc (sizeof(float) * 4);
-	obj->parameter[0][0] = x;
-	obj->parameter[0][1] = y;
-	obj->parameter[0][2] = z;
-	obj->parameter[0][3] = d;
+	surf->parameter[0] = (float *) malloc (sizeof(float) * 4);
+	surf->parameter[0][0] = x;
+	surf->parameter[0][1] = y;
+	surf->parameter[0][2] = z;
+	surf->parameter[0][3] = d;
 
 	return (obj);
 }
 
 objectT *create_sphere_object (float x, float y, float z, float r) {
 	objectT *obj;
+	surfaceT *surf;	
 
 	obj = create_object(1);
 	
-	obj->primitive[0] = SPHERE;
+	surf = &obj->surface[0];	
+	surf->primitive = SPHERE;
 	
-	obj->parameter[0] = (float *) malloc (sizeof(float) * 4);
-	obj->parameter[0][0] = x;
-	obj->parameter[0][1] = y;
-	obj->parameter[0][2] = z;
-	obj->parameter[0][3] = r;
+	surf->parameter[0] = (float *) malloc (sizeof(float) * 4);
+	surf->parameter[0][0] = x;
+	surf->parameter[0][1] = y;
+	surf->parameter[0][2] = z;
+	surf->parameter[0][3] = r;
 
 	return (obj);
 }
@@ -136,23 +140,28 @@ void	add_object_to_scene (sceneT *s, objectT *o) {
 
 rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
+	// Find the nearest intersection
+
 	// do this stupidly for now, just iterate through 
 	// every primative and test for intersections
 	// and then find the closest
 
 	int	i, j;
 
-	vectorT	nearest;
 	float	nearest_distance = 9e99;
+	vectorT	nearest;
+
+	surfaceT *surface;
 
 	for (i=0; i<scene->objects; i++) {
 		objectT *obj = scene->object[i];
 
-		for (j=0; j<obj->primitives; j++) {
+		for (j=0; j<obj->surfaces; j++) {
 			vectorT 	intersection;
-			primitiveT *p = obj->primitive[j];
+			surfaceT 	*surf = &obj->surface[j];
+			primitiveT *p = surf->primitive;
 
-			if (p->ray_intersects(obj->parameter[j], ray, &intersection)) {
+			if (p->ray_intersects(surf->parameter[j], ray, &intersection)) {
 				// We have a hit!
 				float	distance;
 
@@ -164,10 +173,16 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 				if (distance < nearest_distance)  {
 					nearest_distance = distance;
 					nearest = intersection;
+					surface = surf;		
 				}
 			}
 		}
 	}
+
+	// Send reflection ray
+	// Send refraction rays
+
+	memcpy (ray->color, surface->color, sizeof(float) * 4);
 	
 	return (ray);
 }

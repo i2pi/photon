@@ -25,17 +25,28 @@ typedef struct {
 } primitiveT;
 
 typedef struct {
-	int			primitives;
-	primitiveT 	**primitive;
-	float		**parameter;
+	// Function pointers:
+	//  reflection (by wavelenth)
+	//  refraction (by wavelenth)
+	//  transparency (by wavelength)
+	//  diffusion (by angle)
+} surface_propertiesT;
 
-	// TODO: objects become surfaces and share surface properties
-	// objects then have multiple surfaces
+typedef struct {
+	primitiveT *primitive;
+	float		**parameter;
+	float		color[4];
+	surface_propertiesT *properties;
+} surfaceT;
+
+typedef struct {
+	int			surfaces;
+	surfaceT	*surface;
 } objectT;
 
 typedef struct {
 	int		objects;
-	objectT **object;
+	objectT **object;	// TODO: single deref
 	int		allocated;
 } sceneT;
 
