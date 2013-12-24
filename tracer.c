@@ -182,7 +182,8 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 		// Outside the sphere
 		vectorT pc;
 
-		project_vector (&sphere_center, &ray->direction, &pc);
+		//project_vector (&sphere_center, &ray->direction, &pc);
+		project_vector (&ray->direction, &sphere_center, &pc);
 
 		if (dist_vector(&sphere_center, &pc) > radius) {
 			// No intersection
@@ -251,6 +252,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	float	nearest_distance = 9e99;
 	vectorT	nearest;
+	char	found_hit = 0;
 
 	surfaceT *surface;
 
@@ -266,12 +268,9 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 				// We have a hit!
 				float	distance;
 
-				printf ("HIT!\n");
+				found_hit = 1;
 
-				distance = 
-					powf(2.0, intersection.x - ray->origin.x) + 
-					powf(2.0, intersection.y - ray->origin.y) +
-					powf(2.0, intersection.z - ray->origin.z);
+				distance = dist_vector(&intersection, &ray->origin);
 
 				if (distance < nearest_distance)  {
 					nearest_distance = distance;
@@ -281,6 +280,8 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 			}
 		}
 	}
+
+	if (!found_hit) return(NULL);
 
 	// Send reflection ray
 	// Send refraction rays

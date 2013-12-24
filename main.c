@@ -22,7 +22,7 @@ char	*SCREEN_PIXELS;
 
 void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 	int	x, y;
-
+	
 	vectorT	camera;
 
 	camera.x = 0;
@@ -34,19 +34,21 @@ void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 		rayT	ray;
 		rayT 	*ret;
 
+
 		ray.origin = camera;
 
-		ray.direction.x = x / (float) width;
-		ray.direction.y = y / (float) height;
-		ray.direction.z = -3.0;
+		ray.direction.x = 1.0 - 2.0*(x / (float) width);
+		ray.direction.y = 1.0 - 2.0*(y / (float) height);
+		ray.direction.z = 2;
 		normalize_vector(&ray.direction);
 
 		memset (&ray.color[0], 0, sizeof(float) * 4);
 		ret = cast_ray (&ray, SCENE, 5);
-
-		pixels[((y*width) + x)*3 + 0] = ret->color[0] * 255;
-		pixels[((y*width) + x)*3 + 1] = ret->color[1] * 255;
-		pixels[((y*width) + x)*3 + 2] = ret->color[2] * 255;
+		if (ret) {
+			pixels[((y*width) + x)*3 + 0] = ret->color[0] * 255;
+			pixels[((y*width) + x)*3 + 1] = ret->color[1] * 255;
+			pixels[((y*width) + x)*3 + 2] = ret->color[2] * 255;
+		}
 	}
 }
 
@@ -137,20 +139,8 @@ sceneT	*setup_scene (void) {
 }
 
 void init_screen(void) {
-	int	x, y;
-	int	i;
-
 	init_texture_for_pixels(SCREEN_TEXTURE_ID);	
-	SCREEN_PIXELS = (char *) malloc (sizeof(char) * SCREEN_WIDTH * SCREEN_HEIGHT * 4); // 3?
-
-	i = 0;
-	for (y=0; y<SCREEN_HEIGHT; y++)
-	for (x=0; x<SCREEN_WIDTH; x++)
-	{
-		SCREEN_PIXELS[i++] = (x&0x3F) + (y&0x70);
-		SCREEN_PIXELS[i++] = (x&0xf0) + (y&0x0f);
-		SCREEN_PIXELS[i++] = (x&0x0f) + (y&0xf0);
-	}
+	SCREEN_PIXELS = (char *) calloc (sizeof(char), SCREEN_WIDTH * SCREEN_HEIGHT * 3);
 }
 
 int main(int argc, char **argv)
