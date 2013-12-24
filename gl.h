@@ -27,7 +27,7 @@ typedef struct gui_stateT
 gui_stateT  gui_state;
 
 
-void init_gl (int Width, int Height, int argc, char **argv);
+void init_gl (int Width, int Height, int argc, char **argv, sceneT *scene);
 void gl_sphere (float x, float y, float z, float r, int segments);
 void gl_cube(float x, float y, float z, float d);
 

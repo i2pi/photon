@@ -14,6 +14,8 @@
 
 #define PI 3.14159265
 
+sceneT	*SCENE;
+
 void set_camera (void) {
 	float	fov = 45.0f;
 	float	aspect = 1.0f;
@@ -143,49 +145,42 @@ void gl_cube(float x, float y, float z, float d)
   glEnd();                  // Done Drawing The Cube
 }
 
+void 	render_object (objectT *obj) {
+	int	i;
+	glColor4f (1, 0, 0, 1);
+	for (i=0; i<obj->primitives; i++) {
+		obj->primitive[i]->gl_draw(obj->parameter[i]);
+	}
+}
 
-void	scene(void)
+
+void	render_scene(void)
 {
-	int		i, j, N;
-	float 	r;
+	int		i;
 
 	glClearColor(1,1,1,1);
 	glClearDepth(1);				
     glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
-	glColor4f(1.0, 0.0, 0.0, 1.0);
-
-	N = 7;
-	r = 0.1;
-	for (i=0; i<N; i++) 
-	for (j=0; j<N; j++) {
-		float	x, y, z;
-		x = (2.0f * i / (float) (N-1)) - 1.0;
-		z = (2.0f * j / (float) (N-1)) - 1.0;
-		y = -z;
-		z = (z - 1.5) * 5.0;
-
-		if ((i + j) % 2) {
-			gl_cube(x, y, z, r);
-		} else {
-			gl_sphere(x, y, z, r, 100);
-		}
+	for (i=0; i<SCENE->objects; i++) {
+		render_object(SCENE->object[i]);
 	}
 	
 	glutSwapBuffers();	
 }
 
-void init_gl(int Width, int Height, int argc, char **argv)	        
+void init_gl(int Width, int Height, int argc, char **argv, sceneT *scene)	        
 {
+	SCENE = scene;
+
 	glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);
 
     glutInitWindowSize(Width, Height);
 
     gui_state.window = glutCreateWindow("i2photon");
-    glutDisplayFunc(scene);
-
-    glutIdleFunc(scene);
+    glutDisplayFunc(render_scene);
+    glutIdleFunc(render_scene);
     glutReshapeFunc(&ReSizeGLScene);
     glutKeyboardFunc(&keyPressed);
 
