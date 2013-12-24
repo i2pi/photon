@@ -16,6 +16,7 @@
 
 sceneT	*SCENE;
 
+
 void set_camera (void) {
 	float	fov = 45.0f;
 	float	aspect = 1.0f;
@@ -30,7 +31,7 @@ void ReSizeGLScene(int Width, int Height)
 {
 	if (Height==0)	Height=1;
 
-	glViewport(0, 0, Width, Height);		
+	glViewport(0, 0, Width/2, Height);		
 	set_camera();
 	gui_state.w = Width;
 	gui_state.h = Height;
@@ -145,33 +146,31 @@ void gl_cube(float x, float y, float z, float d)
   glEnd();                  // Done Drawing The Cube
 }
 
-void 	render_object (objectT *obj) {
-	int	i;
-	glColor4f (1, 0, 0, 1);
-	for (i=0; i<obj->primitives; i++) {
-		obj->primitive[i]->gl_draw(obj->parameter[i]);
-	}
+
+void init_texture_for_pixels (int tex_id) {
+	glBindTexture(GL_TEXTURE_2D, tex_id);
+
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_DECAL);
+}
+
+void draw_pixels_to_texture (char *pixels, int w, int h, int tex_id) {
+	glBindTexture(GL_TEXTURE_2D, tex_id);
+	glTexImage2D (GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
 }
 
 
-void	render_scene(void)
+
+void init_gl(int argc, char **argv)
 {
-	int		i;
-
-	glClearColor(1,1,1,1);
-	glClearDepth(1);				
-    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-
-	for (i=0; i<SCENE->objects; i++) {
-		render_object(SCENE->object[i]);
-	}
-	
-	glutSwapBuffers();	
-}
-
-void init_gl(int Width, int Height, int argc, char **argv, sceneT *scene)	        
-{
-	SCENE = scene;
+	int	Width = 512;
+	int Height = 256;
 
 	glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);

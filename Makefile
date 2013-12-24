@@ -7,7 +7,7 @@ CFLAGS = $(COMPILERFLAGS) $(INCLUDE)
 COMMON_LIBRARIES=
 LINUX_LIBRARIES = -lX11 -lXmu -lGL -lGLU -lm  -lglut
 MAC_LIBRARIES=-framework GLUT -framework OpenGL -framework Cocoa -framework CoreAudio -framework AudioUnit -framework AudioToolbox -framework OpenCL
-SRC=main.c gl.c tracer.c
+SRC=main.c gl.c tracer.c 
 PROG=photon
 FPACK=file_pack/fpack
 
