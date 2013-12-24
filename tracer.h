@@ -33,8 +33,9 @@ typedef struct {
 } surface_propertiesT;
 
 typedef struct {
+	// A surface is an instance of a primitve
 	primitiveT *primitive;
-	float		**parameter;
+	float		*parameter;
 	float		color[4];
 	surface_propertiesT *properties;
 } surfaceT;

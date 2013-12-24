@@ -70,7 +70,7 @@ void	render_scene(void)
 			surfaceT *surf = &obj->surface[j];
 
 			glColor4fv (surf->color);
-			surf->primitive->gl_draw(surf->parameter[j]);
+			surf->primitive->gl_draw(surf->parameter);
 		}
 	}
 

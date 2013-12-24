@@ -7,7 +7,6 @@
 #include "tracer.h"
 #include "gl.h"
 
-primitiveT	*CUBE;
 primitiveT	*SPHERE;
 primitiveT	*TRIANGLE;
 
@@ -15,6 +14,24 @@ void array_to_vector(float *arr, vectorT *v) {
 	v->x = arr[0];
 	v->y = arr[1];
 	v->z = arr[2];
+}
+
+void vector_to_array(vectorT *v, float *arr) {
+	arr[0] = v->x;
+	arr[1] = v->y;
+	arr[2] = v->z;
+}
+
+void parms_to_array(float x, float y, float z, float *arr) {
+	arr[0] = x;
+	arr[1] = y;
+	arr[2] = z;
+}
+
+void parms_to_vector(float x, float y, float z, vectorT *v) {
+	v->x = x;
+	v->y = y;
+	v->z = z;
 }
 
 float length_vector (vectorT *v) {
@@ -130,25 +147,40 @@ objectT *create_object (int surfaces) {
 	obj->surfaces = surfaces;
 	obj->surface = (surfaceT *) malloc (sizeof (surfaceT) * obj->surfaces);
 
-	obj->surface->parameter = (float **) malloc (sizeof(float *) * obj->surfaces);
-
 	return (obj);
+}
+
+void	init_surface (primitiveT *p, surfaceT *surf) {
+	surf->primitive = p;	
+	surf->parameter = (float *) malloc (sizeof(float) * p->parameters);
+	surf->properties = NULL;
 }
 
 objectT *create_cube_object (float x, float y, float z, float d) {
 	objectT *obj;
 	surfaceT *surf;	
+	int	i;
+	vectorT cube[8];
 
-	obj = create_object(1);
+	obj = create_object(12);
 
-	surf = &obj->surface[0];	
-	surf->primitive = CUBE;
+	for (i=0; i<12; i++) {
+		surf = &obj->surface[i];	
+		init_surface(TRIANGLE, surf);
+	}
+
+	parms_to_vector (x-d, y+d, z-d, &cube[0]);  // Front, top, left
+	parms_to_vector (x+d, y+d, z-d, &cube[1]);  // Front, top, right 
+	parms_to_vector (x+d, y-d, z-d, &cube[2]);  // Front, bottom, right 
+	parms_to_vector (x-d, y-d, z-d, &cube[3]);  // Front, bottom, left
+
+	parms_to_vector (x-d, y+d, z+d, &cube[4]);  // Back, top, left
+	parms_to_vector (x+d, y+d, z+d, &cube[5]);  // Back, top, right 
+	parms_to_vector (x+d, y-d, z+d, &cube[6]);  // Back, bottom, right 
+	parms_to_vector (x-d, y-d, z+d, &cube[7]);  // Back, bottom, left
+
+	// Front
 	
-	surf->parameter[0] = (float *) malloc (sizeof(float) * 4);
-	surf->parameter[0][0] = x;
-	surf->parameter[0][1] = y;
-	surf->parameter[0][2] = z;
-	surf->parameter[0][3] = d;
 
 	return (obj);
 }
@@ -160,13 +192,11 @@ objectT *create_sphere_object (float x, float y, float z, float r) {
 	obj = create_object(1);
 	
 	surf = &obj->surface[0];	
-	surf->primitive = SPHERE;
-	
-	surf->parameter[0] = (float *) malloc (sizeof(float) * 4);
-	surf->parameter[0][0] = x;
-	surf->parameter[0][1] = y;
-	surf->parameter[0][2] = z;
-	surf->parameter[0][3] = r;
+	init_surface (SPHERE, surf);
+	surf->parameter[0] = x;
+	surf->parameter[1] = y;
+	surf->parameter[2] = z;
+	surf->parameter[3] = r;
 
 	return (obj);
 }
@@ -289,8 +319,8 @@ char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersecti
 
 
 void init_primitives (void) {
-	CUBE = create_primitive("cube", cube_gl_draw, null_ray_intersects,
-							4, "x", "y", "z", "d");
+	//CUBE = create_primitive("cube", cube_gl_draw, null_ray_intersects,
+	//						4, "x", "y", "z", "d");
 	SPHERE = create_primitive("sphere", sphere_gl_draw, ray_sphere_intersection,
 							4, "x", "y", "z", "r");
 	TRIANGLE = create_primitive("triangle", triangle_gl_draw, ray_triangle_intersection,
@@ -345,7 +375,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 			surfaceT 	*surf = &obj->surface[j];
 			primitiveT *p = surf->primitive;
 
-			if (p->ray_intersects(surf->parameter[j], ray, &intersection)) {
+			if (p->ray_intersects(surf->parameter, ray, &intersection)) {
 				// We have a hit!
 				float	distance;
 
