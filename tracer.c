@@ -34,6 +34,12 @@ void parms_to_vector(float x, float y, float z, vectorT *v) {
 	v->z = z;
 }
 
+void triangle_to_array (vectorT v1, vectorT v2, vectorT v3, float *triangle) {
+	vector_to_array(&v1, &triangle[0]);
+	vector_to_array(&v2, &triangle[3]);
+	vector_to_array(&v3, &triangle[6]);
+}
+
 float length_vector (vectorT *v) {
 	// |v|
 	float len;
@@ -158,15 +164,13 @@ void	init_surface (primitiveT *p, surfaceT *surf) {
 
 objectT *create_cube_object (float x, float y, float z, float d) {
 	objectT *obj;
-	surfaceT *surf;	
 	int	i;
 	vectorT cube[8];
 
 	obj = create_object(12);
 
 	for (i=0; i<12; i++) {
-		surf = &obj->surface[i];	
-		init_surface(TRIANGLE, surf);
+		init_surface(TRIANGLE, &obj->surface[i]);
 	}
 
 	parms_to_vector (x-d, y+d, z-d, &cube[0]);  // Front, top, left
@@ -179,7 +183,29 @@ objectT *create_cube_object (float x, float y, float z, float d) {
 	parms_to_vector (x+d, y-d, z+d, &cube[6]);  // Back, bottom, right 
 	parms_to_vector (x-d, y-d, z+d, &cube[7]);  // Back, bottom, left
 
-	// Front
+	// Front (0, 1, 2, 3)
+	triangle_to_array(cube[0], cube[1], cube[2], obj->surface[0].parameter);
+	triangle_to_array(cube[0], cube[3], cube[2], obj->surface[1].parameter);
+
+	// Back (4, 5, 6, 7)
+	triangle_to_array(cube[4], cube[5], cube[6], obj->surface[2].parameter);
+	triangle_to_array(cube[4], cube[7], cube[6], obj->surface[3].parameter);
+
+	// Top (0, 1, 4, 5)
+	triangle_to_array(cube[0], cube[1], cube[4], obj->surface[4].parameter);
+	triangle_to_array(cube[4], cube[5], cube[1], obj->surface[5].parameter);
+
+	// Bottom (2, 3, 6, 7)
+	triangle_to_array(cube[2], cube[3], cube[6], obj->surface[6].parameter);
+	triangle_to_array(cube[6], cube[7], cube[3], obj->surface[7].parameter);
+
+	// Left (0, 3, 4, 7)
+	triangle_to_array(cube[0], cube[3], cube[4], obj->surface[8].parameter);
+	triangle_to_array(cube[4], cube[7], cube[3], obj->surface[9].parameter);
+
+	// Right (1, 2, 5, 6)
+	triangle_to_array(cube[1], cube[2], cube[5], obj->surface[10].parameter);
+	triangle_to_array(cube[5], cube[6], cube[2], obj->surface[11].parameter);
 	
 
 	return (obj);
@@ -266,10 +292,6 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 }
 
 char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersection) {
-
-
-// rayIntersectsTriangle(float *p, float *d, float *v0, float *v1, float *v2) 
-
 	vectorT	p, d, v0, v1, v2;
 	vectorT	e1, e2, h, s, q;
 	float 	a, f, u, v, t;
@@ -286,7 +308,6 @@ char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersecti
 
 	cross_vector(&d, &e2, &h);
 	a = dot_vector(&e1, &h);
-
 
 	if (a > -0.00001 && a < 0.00001) {
 		return (0);
@@ -309,12 +330,20 @@ char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersecti
 
 	t = f * dot_vector(&e2, &q);
 
-	if (t > 0.00001) {
+	if (t < 0.00001) {
 		scale_offset_vector (&ray->origin, &ray->direction, t, intersection);
 		return (1);
 	} 
 
 	return (0);
+}
+
+void color_object (objectT *obj, float *color) {
+	int	i;
+
+	for (i=0; i<obj->surfaces; i++) {
+		memcpy(obj->surface[i].color, color, sizeof(float) * 4);
+	}
 }
 
 

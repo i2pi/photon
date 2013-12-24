@@ -103,8 +103,11 @@ void	render_scene(void)
 
 sceneT	*setup_scene (void) {
 	sceneT	*s;
+	objectT	*obj;
 	int	i, j, N;
 	float r;
+	float red[4] =   {1, 0, 0, 1};
+	float green[4] = {0, 1, 0, 1};
 
 	s = create_scene ();
 
@@ -113,26 +116,20 @@ sceneT	*setup_scene (void) {
 	for (i=0; i<N; i++)
 	for (j=0; j<N; j++) {
 		float   x, y, z;
-		objectT	*obj;
 		x = (2.0f * i / (float) (N-1)) - 1.0;
 		z = (2.0f * j / (float) (N-1)) - 1.0;
 		y = -z;
 		z = (z - 1.5) * 5.0;
 		if ((i + j) % 2) {
 			obj = create_cube_object(x, y, z, r);
-			obj->surface[0].color[0] = 1.0;
-			obj->surface[0].color[1] = 0.0;
-			obj->surface[0].color[2] = 0.0;
-			obj->surface[0].color[3] = 1.0;
+			color_object (obj, red);
 		} else {
 			obj = create_sphere_object(x, y, z, r);
-			obj->surface[0].color[0] = 0.0;
-			obj->surface[0].color[1] = 1.0;
-			obj->surface[0].color[2] = 0.0;
-			obj->surface[0].color[3] = 1.0;
+			color_object (obj, green);
 		}
 		add_object_to_scene (s, obj);
 	}
+
 
 	return (s);
 }

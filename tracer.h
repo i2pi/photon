@@ -61,6 +61,11 @@ objectT *create_sphere_object (float x, float y, float z, float d);
 sceneT *create_scene (void);
 void    add_object_to_scene (sceneT *s, objectT *o);
 
+/* 
+** SURFACE PROPERTIES
+*/
+void color_object (objectT *obj, float *color);
+
 /*
 ** VECTOR OPS
 */
