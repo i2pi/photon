@@ -10,12 +10,53 @@
 primitiveT	*CUBE;
 primitiveT	*SPHERE;
 
-void normalize_vector (vectorT *v) {
+float length_vector (vectorT *v) {
+	// |v|
 	float len;
 	len = sqrt(v->x*v->x + v->y*v->y + v->z*v->z);
+	return (len);	
+}
+
+void normalize_vector (vectorT *v) {
+	// v / |v|
+	float len = length_vector(v);
 	v->x /= len;
 	v->y /= len;
 	v->z /= len;
+}
+
+vectorT diff_vector (vectorT *a, vectorT *b) {
+	// a - b
+	vectorT v;
+	v.x = a->x - b->x;
+	v.y = a->y - b->y;
+	v.z = a->z - b->z;
+	return (v);
+}
+
+float dist_vector (vectorT *a, vectorT *b) {
+	vectorT d = diff_vector(a, b);
+	return (length_vector(&d));
+}
+
+float	dot_vector (vectorT *a, vectorT *b) {
+	// a . b
+	float d;
+	d = a->x * b->x + 
+		a->y * b->y +
+		a->z * b->z;
+	return (d);
+}
+
+vectorT project_vector (vectorT *a, vectorT *b) {
+	// (a . b) / |a| * a;
+	vectorT v;
+	float 	d = dot_vector(a, b) / length_vector(a);
+	v = *a;
+	v.x *= d;
+	v.y *= d;
+	v.z *= d;
+	return (v);	
 }
 
 primitiveT	*create_primitive(char *name, 
@@ -111,11 +152,74 @@ char	null_ray_intersects (float *parameter, rayT *ray, vectorT *intersection) {
 	return (0);
 }
 
+char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection) {
+
+	vectorT vpc;
+	vectorT sphere_center;
+	float	radius;
+	float	vpc_len;
+
+	sphere_center.x = parameter[0];
+	sphere_center.y = parameter[1];
+	sphere_center.z = parameter[2];
+	radius = parameter[3];
+
+	vpc = diff_vector(&ray->origin, &sphere_center);
+	vpc_len = length_vector(&vpc);
+	
+	if (dot_vector(&vpc, &ray->direction) < 0) {
+		// The ray origin is inside the sphere
+		if (vpc_len > radius) {
+			// No intersection
+			return (0);
+		} else 
+		if (vpc_len == radius) {
+			// Glances surface
+			*intersection = ray->origin;
+		} else {
+			// Pierces
+			fprintf (stderr, "TODO\n");
+			exit(-1);
+		}
+	} else {
+		// Outside the sphere
+		vectorT pc;
+
+		pc = project_vector (&sphere_center, &ray->direction);
+
+		if (dist_vector(&sphere_center, &pc) > radius) {
+			// No intersection
+			return (0);
+		} else {
+
+			float dist = sqrt(
+							powf(radius,2.0f) - 
+							powf(dist_vector(&pc, &sphere_center), 2.0f)
+						);
+			float	d;
+
+			if (vpc_len > radius) {
+				d = dist_vector(&pc, &ray->origin) - dist;
+			} else {
+				d = dist_vector(&pc, &ray->origin) + dist;
+			} 
+			intersection->x = ray->origin.x + ray->direction.x * d;
+			intersection->y = ray->origin.y + ray->direction.y * d;
+			intersection->z = ray->origin.z + ray->direction.z * d;
+		}
+	}
+	
+	return (1);
+}
+
+
 void init_primitives (void) {
 	CUBE = create_primitive("cube", cube_gl_draw, null_ray_intersects,
 							4, "x", "y", "z", "d");
-	SPHERE = create_primitive("sphere", sphere_gl_draw, null_ray_intersects,
+	SPHERE = create_primitive("sphere", sphere_gl_draw, ray_sphere_intersection,
 							4, "x", "y", "z", "r");
+
+	// todo: plane, triangle, lens
 }
 
 sceneT *create_scene (void) {
@@ -181,6 +285,10 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	// Send reflection ray
 	// Send refraction rays
+
+	// By Metropolis:
+	// - Difussion 
+	// - Scattering
 
 	memcpy (ray->color, surface->color, sizeof(float) * 4);
 	
