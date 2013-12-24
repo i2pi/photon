@@ -9,6 +9,13 @@
 
 primitiveT	*CUBE;
 primitiveT	*SPHERE;
+primitiveT	*TRIANGLE;
+
+void array_to_vector(float *arr, vectorT *v) {
+	v->x = arr[0];
+	v->y = arr[1];
+	v->z = arr[2];
+}
 
 float length_vector (vectorT *v) {
 	// |v|
@@ -47,6 +54,13 @@ float	dot_vector (vectorT *a, vectorT *b) {
 	return (d);
 }
 
+void cross_vector(vectorT *a, vectorT *b, vectorT *v) {
+	// v = a x b
+	v->x = a->y * b->z - b->y * a->z; 
+	v->y = a->z * b->x - b->z * a->x; 
+	v->z = a->x * b->y - b->x * a->y;
+}
+
 void project_vector (vectorT *a, vectorT *b, vectorT *v) {
 	// v = (a . b) / |a| * a;
 	float 	d = dot_vector(a, b) / length_vector(a);
@@ -54,6 +68,14 @@ void project_vector (vectorT *a, vectorT *b, vectorT *v) {
 	v->x *= d;
 	v->y *= d;
 	v->z *= d;
+}
+
+void scale_offset_vector (vectorT *a, vectorT *d, float s, vectorT *v) {
+	// v = a + (s * d)
+
+	v->x = a->x + s * d->x;
+	v->y = a->y + s * d->y;
+	v->z = a->z + s * d->z;
 }
 
 primitiveT	*create_primitive(char *name, 
@@ -94,6 +116,10 @@ void cube_gl_draw(float *parameter) {
 
 void sphere_gl_draw(float *parameter) {
 	gl_sphere(parameter[0], parameter[1], parameter[2], parameter[3], 100);
+}
+
+void triangle_gl_draw(float *parameter) {
+	gl_triangle(parameter);
 }
 
 objectT *create_object (int surfaces) {
@@ -150,7 +176,6 @@ char	null_ray_intersects (float *parameter, rayT *ray, vectorT *intersection) {
 }
 
 char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection) {
-
 	vectorT vpc;
 	vectorT sphere_center;
 	float	radius;
@@ -210,14 +235,70 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 	return (1);
 }
 
+char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersection) {
+
+
+// rayIntersectsTriangle(float *p, float *d, float *v0, float *v1, float *v2) 
+
+	vectorT	p, d, v0, v1, v2;
+	vectorT	e1, e2, h, s, q;
+	float 	a, f, u, v, t;
+
+	p = ray->origin;
+	d = ray->direction;
+
+	array_to_vector(&parameter[0], &v0);
+	array_to_vector(&parameter[3], &v1);
+	array_to_vector(&parameter[6], &v2);
+
+	diff_vector(&v1, &v0, &e1);
+	diff_vector(&v2, &v0, &e2);
+
+	cross_vector(&d, &e2, &h);
+	a = dot_vector(&e1, &h);
+
+
+	if (a > -0.00001 && a < 0.00001) {
+		return (0);
+	}
+
+	f = 1.0 / a;
+	diff_vector (&p, &v0, &s);
+	u = f * dot_vector(&s, &h);
+
+	if (u < 0.0 || u > 1.0) {
+		return (0);
+	}
+
+	cross_vector(&s, &e1, &q);
+	v = f * dot_vector(&d, &q);
+
+	if (v < 0.0 || u + v > 1.0) {
+		return (0);
+	}
+
+	t = f * dot_vector(&e2, &q);
+
+	if (t > 0.00001) {
+		scale_offset_vector (&ray->origin, &ray->direction, t, intersection);
+		return (1);
+	} 
+
+	return (0);
+}
+
 
 void init_primitives (void) {
 	CUBE = create_primitive("cube", cube_gl_draw, null_ray_intersects,
 							4, "x", "y", "z", "d");
 	SPHERE = create_primitive("sphere", sphere_gl_draw, ray_sphere_intersection,
 							4, "x", "y", "z", "r");
+	TRIANGLE = create_primitive("triangle", triangle_gl_draw, ray_triangle_intersection,
+							9, "x1", "y1", "z1", 
+							   "x2", "y2", "z2", 
+							   "x3", "y3", "z3");
 
-	// todo: plane, triangle, lens
+	// todo: plane, lens, aperture
 }
 
 sceneT *create_scene (void) {

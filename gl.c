@@ -104,6 +104,14 @@ void gl_sphere (float x, float y, float z, float r, int segments) {
 	glEnd();
 }
 
+void gl_triangle(float *vertex) {
+	glBegin(GL_TRIANGLES);
+	glVertex3f(vertex[0], vertex[1], vertex[2]);
+	glVertex3f(vertex[3], vertex[4], vertex[5]);
+	glVertex3f(vertex[6], vertex[7], vertex[8]);
+	glEnd();
+}
+
 void gl_cube(float x, float y, float z, float d)
 {
   glBegin(GL_QUADS);                // start drawing the cube.
