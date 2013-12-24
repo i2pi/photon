@@ -34,12 +34,11 @@ void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 		rayT	ray;
 		rayT 	*ret;
 
-
 		ray.origin = camera;
 
 		ray.direction.x = 1.0 - 2.0*(x / (float) width);
 		ray.direction.y = 1.0 - 2.0*(y / (float) height);
-		ray.direction.z = 2;
+		ray.direction.z = 2.445; // TODO: calc from fov
 		normalize_vector(&ray.direction);
 
 		memset (&ray.color[0], 0, sizeof(float) * 4);
