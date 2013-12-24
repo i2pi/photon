@@ -25,17 +25,16 @@ void normalize_vector (vectorT *v) {
 	v->z /= len;
 }
 
-vectorT diff_vector (vectorT *a, vectorT *b) {
-	// a - b
-	vectorT v;
-	v.x = a->x - b->x;
-	v.y = a->y - b->y;
-	v.z = a->z - b->z;
-	return (v);
+void diff_vector (vectorT *a, vectorT *b, vectorT *v) {
+	// v = a - b
+	v->x = a->x - b->x;
+	v->y = a->y - b->y;
+	v->z = a->z - b->z;
 }
 
 float dist_vector (vectorT *a, vectorT *b) {
-	vectorT d = diff_vector(a, b);
+	vectorT d;
+	diff_vector(a, b, &d);
 	return (length_vector(&d));
 }
 
@@ -48,15 +47,13 @@ float	dot_vector (vectorT *a, vectorT *b) {
 	return (d);
 }
 
-vectorT project_vector (vectorT *a, vectorT *b) {
-	// (a . b) / |a| * a;
-	vectorT v;
+void project_vector (vectorT *a, vectorT *b, vectorT *v) {
+	// v = (a . b) / |a| * a;
 	float 	d = dot_vector(a, b) / length_vector(a);
-	v = *a;
-	v.x *= d;
-	v.y *= d;
-	v.z *= d;
-	return (v);	
+	*v = *a;
+	v->x *= d;
+	v->y *= d;
+	v->z *= d;
 }
 
 primitiveT	*create_primitive(char *name, 
@@ -164,7 +161,7 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 	sphere_center.z = parameter[2];
 	radius = parameter[3];
 
-	vpc = diff_vector(&ray->origin, &sphere_center);
+	diff_vector(&ray->origin, &sphere_center, &vpc);
 	vpc_len = length_vector(&vpc);
 	
 	if (dot_vector(&vpc, &ray->direction) < 0) {
@@ -185,7 +182,7 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 		// Outside the sphere
 		vectorT pc;
 
-		pc = project_vector (&sphere_center, &ray->direction);
+		project_vector (&sphere_center, &ray->direction, &pc);
 
 		if (dist_vector(&sphere_center, &pc) > radius) {
 			// No intersection
@@ -268,6 +265,8 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 			if (p->ray_intersects(surf->parameter[j], ray, &intersection)) {
 				// We have a hit!
 				float	distance;
+
+				printf ("HIT!\n");
 
 				distance = 
 					powf(2.0, intersection.x - ray->origin.x) + 
