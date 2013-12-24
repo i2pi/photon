@@ -34,10 +34,11 @@ void parms_to_vector(float x, float y, float z, vectorT *v) {
 	v->z = z;
 }
 
-void triangle_to_array (vectorT v1, vectorT v2, vectorT v3, float *triangle) {
+void flat_triangle_to_array (vectorT v1, vectorT v2, vectorT v3, vectorT norm, float *triangle) {
 	vector_to_array(&v1, &triangle[0]);
 	vector_to_array(&v2, &triangle[3]);
 	vector_to_array(&v3, &triangle[6]);
+	vector_to_array(&norm, &triangle[9]);
 }
 
 float length_vector (vectorT *v) {
@@ -99,6 +100,15 @@ void scale_offset_vector (vectorT *a, vectorT *d, float s, vectorT *v) {
 	v->x = a->x + s * d->x;
 	v->y = a->y + s * d->y;
 	v->z = a->z + s * d->z;
+}
+
+void triangle_normal (vectorT *a, vectorT *b, vectorT *c, vectorT *n) {
+	vectorT v1, v2;
+
+	diff_vector(a, b, &v1);
+	diff_vector(a, c, &v2);
+	cross_vector(&v1, &v2, n);
+	normalize_vector(n);
 }
 
 primitiveT	*create_primitive(char *name, 
@@ -166,10 +176,11 @@ objectT *create_cube_object (float x, float y, float z, float d) {
 	objectT *obj;
 	int	i;
 	vectorT cube[8];
+	vectorT	norm;
 
 	obj = create_object(12);
 
-	for (i=0; i<12; i++) {
+	for (i=0; i<obj->surfaces; i++) {
 		init_surface(TRIANGLE, &obj->surface[i]);
 	}
 
@@ -184,29 +195,34 @@ objectT *create_cube_object (float x, float y, float z, float d) {
 	parms_to_vector (x-d, y-d, z+d, &cube[7]);  // Back, bottom, left
 
 	// Front (0, 1, 2, 3)
-	triangle_to_array(cube[0], cube[1], cube[2], obj->surface[0].parameter);
-	triangle_to_array(cube[0], cube[3], cube[2], obj->surface[1].parameter);
+	norm.x = 0; norm.y = 0; norm.z = 1;
+	flat_triangle_to_array(cube[0], cube[1], cube[2], norm, obj->surface[0].parameter);
+	flat_triangle_to_array(cube[0], cube[3], cube[2], norm, obj->surface[1].parameter);
 
 	// Back (4, 5, 6, 7)
-	triangle_to_array(cube[4], cube[5], cube[6], obj->surface[2].parameter);
-	triangle_to_array(cube[4], cube[7], cube[6], obj->surface[3].parameter);
+	norm.x = 0; norm.y = 0; norm.z = -1;
+	flat_triangle_to_array(cube[4], cube[5], cube[6], norm, obj->surface[2].parameter);
+	flat_triangle_to_array(cube[4], cube[7], cube[6], norm, obj->surface[3].parameter);
 
 	// Top (0, 1, 4, 5)
-	triangle_to_array(cube[0], cube[1], cube[4], obj->surface[4].parameter);
-	triangle_to_array(cube[4], cube[5], cube[1], obj->surface[5].parameter);
+	norm.x = 0; norm.y = 1; norm.z = 0;
+	flat_triangle_to_array(cube[0], cube[1], cube[4], norm, obj->surface[4].parameter);
+	flat_triangle_to_array(cube[4], cube[5], cube[1], norm, obj->surface[5].parameter);
 
 	// Bottom (2, 3, 6, 7)
-	triangle_to_array(cube[2], cube[3], cube[6], obj->surface[6].parameter);
-	triangle_to_array(cube[6], cube[7], cube[3], obj->surface[7].parameter);
+	norm.x = 0; norm.y = -1; norm.z = 0;
+	flat_triangle_to_array(cube[2], cube[3], cube[6], norm, obj->surface[6].parameter);
+	flat_triangle_to_array(cube[6], cube[7], cube[3], norm, obj->surface[7].parameter);
 
 	// Left (0, 3, 4, 7)
-	triangle_to_array(cube[0], cube[3], cube[4], obj->surface[8].parameter);
-	triangle_to_array(cube[4], cube[7], cube[3], obj->surface[9].parameter);
+	norm.x = -1; norm.y = 0; norm.z = 0;
+	flat_triangle_to_array(cube[0], cube[3], cube[4], norm, obj->surface[8].parameter);
+	flat_triangle_to_array(cube[4], cube[7], cube[3], norm, obj->surface[9].parameter);
 
 	// Right (1, 2, 5, 6)
-	triangle_to_array(cube[1], cube[2], cube[5], obj->surface[10].parameter);
-	triangle_to_array(cube[5], cube[6], cube[2], obj->surface[11].parameter);
-	
+	norm.x = 1; norm.y = 0; norm.z = 0;
+	flat_triangle_to_array(cube[1], cube[2], cube[5], norm, obj->surface[10].parameter);
+	flat_triangle_to_array(cube[5], cube[6], cube[2], norm, obj->surface[11].parameter);
 
 	return (obj);
 }
@@ -353,9 +369,10 @@ void init_primitives (void) {
 	SPHERE = create_primitive("sphere", sphere_gl_draw, ray_sphere_intersection,
 							4, "x", "y", "z", "r");
 	TRIANGLE = create_primitive("triangle", triangle_gl_draw, ray_triangle_intersection,
-							9, "x1", "y1", "z1", 
+							12, "x1", "y1", "z1", 
 							   "x2", "y2", "z2", 
-							   "x3", "y3", "z3");
+							   "x3", "y3", "z3",
+							   "nx", "ny", "nz");
 
 	// todo: plane, lens, aperture
 }

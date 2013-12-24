@@ -56,6 +56,28 @@ void	render_scene(void)
 	int		i, j;
 
 	// Render GL version
+
+// TODO: Move lighting definitions to tracer.h
+typedef struct
+{
+  float pos[4];
+  float diffuse[4];
+  float specular[4];
+  float ambient[4];
+}light_t;
+light_t light={
+      {0,0,-15,0},  //position (the final 1 means the light is positional)
+      {1,1,1,1},    //diffuse
+      {0,0,0,1},    //specular
+      {0,0,0,1} 	//ambient
+    };
+
+glLightfv(GL_LIGHT0,GL_POSITION,light.pos);   	//updates the light's position
+glLightfv(GL_LIGHT0,GL_DIFFUSE,light.diffuse);    //updates the light's diffuse colour
+glLightfv(GL_LIGHT0,GL_SPECULAR,light.specular);  //updates the light's specular colour
+glLightfv(GL_LIGHT0,GL_AMBIENT,light.ambient);    //updates the light's ambient colour
+
+
 	set_camera();
 	glViewport(0, 0, gui_state.w/2, gui_state.h);		
 
@@ -69,7 +91,13 @@ void	render_scene(void)
 		for (j=0; j<obj->surfaces; j++) {
 			surfaceT *surf = &obj->surface[j];
 
+			// TODO: Make a gl_surface_properties() and put it in gl_draw()
 			glColor4fv (surf->color);
+			glColorMaterial(GL_FRONT,GL_DIFFUSE);	
+			float black[4]={0,0,0,0};
+			glMaterialfv(GL_FRONT,GL_AMBIENT,black);
+			glMaterialfv(GL_FRONT,GL_SPECULAR,black);
+
 			surf->primitive->gl_draw(surf->parameter);
 		}
 	}
@@ -80,7 +108,7 @@ void	render_scene(void)
 	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
 	glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
 
-	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
+	//ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
 
@@ -111,6 +139,7 @@ sceneT	*setup_scene (void) {
 
 	s = create_scene ();
 
+/*
 	N = 7;
 	r = 0.1;
 	for (i=0; i<N; i++)
@@ -129,7 +158,10 @@ sceneT	*setup_scene (void) {
 		}
 		add_object_to_scene (s, obj);
 	}
-
+*/
+	obj = create_cube_object(0, 0, -3, 0.5);
+	color_object(obj, red);
+	add_object_to_scene (s, obj);
 
 	return (s);
 }

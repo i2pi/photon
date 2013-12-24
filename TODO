@@ -1,4 +1,6 @@
 - GL lighting
+- move lighting defintion to tracer.h
+- floor & sky in scene
 - Single pass ray illumination
 - reflection
 - refraction

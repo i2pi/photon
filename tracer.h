@@ -70,7 +70,20 @@ void color_object (objectT *obj, float *color);
 ** VECTOR OPS
 */
 
-void 	normalize_vector (vectorT *v);
+void array_to_vector(float *arr, vectorT *v);
+void vector_to_array(vectorT *v, float *arr);
+void parms_to_array(float x, float y, float z, float *arr);
+void parms_to_vector(float x, float y, float z, vectorT *v);
+void triangle_to_array (vectorT v1, vectorT v2, vectorT v3, float *triangle);
+float length_vector (vectorT *v);
+void normalize_vector (vectorT *v);
+void diff_vector (vectorT *a, vectorT *b, vectorT *v);
+float dist_vector (vectorT *a, vectorT *b);
+float	dot_vector (vectorT *a, vectorT *b);
+void cross_vector(vectorT *a, vectorT *b, vectorT *v);
+void project_vector (vectorT *a, vectorT *b, vectorT *v);
+void scale_offset_vector (vectorT *a, vectorT *d, float s, vectorT *v);
+void triangle_normal (vectorT *a, vectorT *b, vectorT *c, vectorT *n);
 
 /*
 ** RAY CASTING

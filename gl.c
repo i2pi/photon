@@ -61,16 +61,23 @@ void keyPressed(unsigned char key, int x, int y)
 
 void gl_sphere (float x, float y, float z, float r, int segments) {
 	vectorT *p_circle;
+	vectorT *p_norm;
 	vectorT *circle;
+	vectorT *norm;
 	int		i, j;
 
 	p_circle = (vectorT *) malloc (sizeof(vectorT) * segments);
 	circle = (vectorT *) malloc (sizeof(vectorT) * segments);
+	p_norm = (vectorT *) malloc (sizeof(vectorT) * segments);
+	norm = (vectorT *) malloc (sizeof(vectorT) * segments);
 
 	for (i=0; i<segments; i++) {
 		p_circle[i].x = x;
 		p_circle[i].y = y - r;
 		p_circle[i].z = z;
+		p_norm[i].x = 0;
+		p_norm[i].y = -1;
+		p_norm[i].z = 0;
 	}	
 
 	glBegin(GL_TRIANGLES);                
@@ -83,22 +90,35 @@ void gl_sphere (float x, float y, float z, float r, int segments) {
 			circle[j].x = x + R*sin(t);
 			circle[j].y = y + h;
 			circle[j].z = z + R*cos(t);
+
+			norm[j].x = sin(t);
+			norm[j].y = h / r;
+			norm[j].z = cos(t);
+			normalize_vector(&norm[j]); 
 		}
 
 		for (j=0; j<segments; j++) {
 			int	n = (j+1) % segments;	
+
 			// pointing up
+			glNormal3f(norm[j].x, norm[j].y, norm[j].z);
 			glVertex3f(circle[j].x, circle[j].y, circle[j].z);	
+			glNormal3f(norm[n].x, norm[n].y, norm[n].z);
 			glVertex3f(circle[n].x, circle[n].y, circle[n].z);	
+			glNormal3f(p_norm[j].x, p_norm[j].y, p_norm[j].z);
 			glVertex3f(p_circle[j].x, p_circle[j].y, p_circle[j].z);	
 
 			// pointing down
+			glNormal3f(p_norm[j].x, p_norm[j].y, p_norm[j].z);
 			glVertex3f(p_circle[j].x, p_circle[j].y, p_circle[j].z);	
+			glNormal3f(p_norm[n].x, p_norm[n].y, p_norm[n].z);
 			glVertex3f(p_circle[n].x, p_circle[n].y, p_circle[n].z);	
+			glNormal3f(norm[n].x, norm[n].y, norm[n].z);
 			glVertex3f(circle[n].x, circle[n].y, circle[n].z);	
 		}
 
 		memcpy (p_circle, circle, sizeof(vectorT) * segments);
+		memcpy (p_norm, norm, sizeof(vectorT) * segments);
 	}
 
 	glEnd();
@@ -106,6 +126,7 @@ void gl_sphere (float x, float y, float z, float r, int segments) {
 
 void gl_triangle(float *vertex) {
 	glBegin(GL_TRIANGLES);
+	glNormal3f(vertex[9], vertex[10], vertex[11]);
 	glVertex3f(vertex[0], vertex[1], vertex[2]);
 	glVertex3f(vertex[3], vertex[4], vertex[5]);
 	glVertex3f(vertex[6], vertex[7], vertex[8]);
@@ -201,6 +222,11 @@ void init_gl(int argc, char **argv)
 	glShadeModel(GL_SMOOTH);		
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	glEnable(GL_LIGHTING);                 	//enables lighting
+	glEnable(GL_LIGHT0);                   	//enables a light
+	glLightModeli(GL_LIGHT_MODEL_TWO_SIDE,0);  
+	glEnable(GL_COLOR_MATERIAL);
 
 	gui_state.w = Width;
 	gui_state.h = Height;
