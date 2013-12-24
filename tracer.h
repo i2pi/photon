@@ -5,9 +5,11 @@ typedef struct {
 	float	x, y, z;
 } vectorT;
 
+
 typedef struct {
 	vectorT		origin;
 	vectorT		direction;
+	float		color[4];	//RGBA
 } rayT;
 
 typedef struct {
@@ -19,6 +21,7 @@ typedef struct {
 	// - ray-primitive intersection 
 
 	void	(*gl_draw)(float *parameter);
+	char	(*ray_intersects)(float *parameter, rayT *ray, vectorT *intersection);
 } primitiveT;
 
 typedef struct {
@@ -32,17 +35,30 @@ typedef struct {
 
 typedef struct {
 	int		objects;
-	int		allocated;
 	objectT **object;
+	int		allocated;
 } sceneT;
 
 
-void init_primitives (void);
-
+/*
+** SCENE MANAGEMENT
+*/
+void 	init_primitives (void);
 objectT *create_cube_object (float x, float y, float z, float d);
 objectT *create_sphere_object (float x, float y, float z, float d);
-
 sceneT *create_scene (void);
 void    add_object_to_scene (sceneT *s, objectT *o);
+
+/*
+** VECTOR OPS
+*/
+
+void 	normalize_vector (vectorT *v);
+
+/*
+** RAY CASTING
+*/
+
+rayT    *cast_ray (rayT *ray, sceneT *scene, int depth);
 
 #endif 

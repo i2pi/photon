@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <math.h>
 
 #include "tracer.h"
 #include "gl.h"
@@ -9,7 +10,19 @@
 primitiveT	*CUBE;
 primitiveT	*SPHERE;
 
-primitiveT	*create_primitive(char *name, void (*gl_draw)(float *p), int parameters, ...) {
+void normalize_vector (vectorT *v) {
+	float len;
+	len = sqrt(v->x*v->x + v->y*v->y + v->z*v->z);
+	v->x /= len;
+	v->y /= len;
+	v->z /= len;
+}
+
+primitiveT	*create_primitive(char *name, 
+					void (*gl_draw)(float *p), 
+					char (*ray_intersects)(float *p, rayT *r, vectorT *i), 
+					int parameters, 
+					...) {
 	va_list	ap;
 	int		i;
 	
@@ -23,6 +36,7 @@ primitiveT	*create_primitive(char *name, void (*gl_draw)(float *p), int paramete
 
 	p->name = strdup(name);
 	p->gl_draw = gl_draw;
+	p->ray_intersects = ray_intersects;
 	p->parameters = parameters;
 
 	p->parameter_name = (char **) malloc (sizeof(char *) * parameters);
@@ -89,9 +103,15 @@ objectT *create_sphere_object (float x, float y, float z, float r) {
 	return (obj);
 }
 
+char	null_ray_intersects (float *parameter, rayT *ray, vectorT *intersection) {
+	return (0);
+}
+
 void init_primitives (void) {
-	CUBE = create_primitive("cube", cube_gl_draw, 4, "x", "y", "z", "d");
-	SPHERE = create_primitive("sphere", sphere_gl_draw, 4, "x", "y", "z", "r");
+	CUBE = create_primitive("cube", cube_gl_draw, null_ray_intersects,
+							4, "x", "y", "z", "d");
+	SPHERE = create_primitive("sphere", sphere_gl_draw, null_ray_intersects,
+							4, "x", "y", "z", "r");
 }
 
 sceneT *create_scene (void) {
@@ -112,4 +132,42 @@ void	add_object_to_scene (sceneT *s, objectT *o) {
 	}
 
 	s->object[s->objects++] = o;
+}
+
+rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
+
+	// do this stupidly for now, just iterate through 
+	// every primative and test for intersections
+	// and then find the closest
+
+	int	i, j;
+
+	vectorT	nearest;
+	float	nearest_distance = 9e99;
+
+	for (i=0; i<scene->objects; i++) {
+		objectT *obj = scene->object[i];
+
+		for (j=0; j<obj->primitives; j++) {
+			vectorT 	intersection;
+			primitiveT *p = obj->primitive[j];
+
+			if (p->ray_intersects(obj->parameter[j], ray, &intersection)) {
+				// We have a hit!
+				float	distance;
+
+				distance = 
+					powf(2.0, intersection.x - ray->origin.x) + 
+					powf(2.0, intersection.y - ray->origin.y) +
+					powf(2.0, intersection.z - ray->origin.z);
+
+				if (distance < nearest_distance)  {
+					nearest_distance = distance;
+					nearest = intersection;
+				}
+			}
+		}
+	}
+	
+	return (ray);
 }

@@ -20,6 +20,36 @@ sceneT	*SCENE;
 
 char	*SCREEN_PIXELS;
 
+void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
+	int	x, y;
+
+	vectorT	camera;
+
+	camera.x = 0;
+	camera.y = 0;
+	camera.z = 0;
+
+	for (y=0; y<height; y++) 
+	for (x=0; x<width; x++) {
+		rayT	ray;
+		rayT 	*ret;
+
+		ray.origin = camera;
+
+		ray.direction.x = x / (float) width;
+		ray.direction.y = y / (float) height;
+		ray.direction.z = -3.0;
+		normalize_vector(&ray.direction);
+
+		memset (&ray.color[0], 0, sizeof(float) * 4);
+		ret = cast_ray (&ray, SCENE, 5);
+
+		pixels[((y*width) + x)*3 + 0] = ret->color[0] * 255;
+		pixels[((y*width) + x)*3 + 1] = ret->color[1] * 255;
+		pixels[((y*width) + x)*3 + 2] = ret->color[2] * 255;
+	}
+}
+
 void	render_scene(void)
 {
 	int		i, j;
@@ -45,6 +75,8 @@ void	render_scene(void)
 	glLoadIdentity();
 	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
 	glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
+
+	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
 
