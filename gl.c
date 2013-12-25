@@ -23,8 +23,9 @@ void set_camera (void) {
 	
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();			
-	gluPerspective(fov,aspect,0.1f,100.0f);
+	gluPerspective(fov,aspect,0.01f,100.0f);
 	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();			
 }
 
 void ReSizeGLScene(int Width, int Height)
@@ -202,7 +203,7 @@ void init_gl(int argc, char **argv)
 	int Height = 256;
 
 	glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA);
+    glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA | GLUT_DEPTH);
 
     glutInitWindowSize(Width, Height);
 
@@ -213,8 +214,8 @@ void init_gl(int argc, char **argv)
     glutKeyboardFunc(&keyPressed);
 
 	glEnable(GL_TEXTURE_2D);
-	glClearColor(1,1,1,1);
-	glClearDepth(1);				
+	glClearColor(1,1,1,0);
+	glClearDepth(0);				
 	glEnable(GL_LINE_SMOOTH);
 	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST); 
 	glDepthFunc(GL_LESS);			   
@@ -225,7 +226,7 @@ void init_gl(int argc, char **argv)
 
 	glEnable(GL_LIGHTING);                 	//enables lighting
 	glEnable(GL_LIGHT0);                   	//enables a light
-	glLightModeli(GL_LIGHT_MODEL_TWO_SIDE,0);  
+//	glLightModeli(GL_LIGHT_MODEL_TWO_SIDE,0);  
 	glEnable(GL_COLOR_MATERIAL);
 
 	gui_state.w = Width;

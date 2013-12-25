@@ -194,13 +194,13 @@ objectT *create_cube_object (float x, float y, float z, float d) {
 	parms_to_vector (x+d, y-d, z+d, &cube[6]);  // Back, bottom, right 
 	parms_to_vector (x-d, y-d, z+d, &cube[7]);  // Back, bottom, left
 
-	// Front (0, 1, 2, 3)
-	norm.x = 0; norm.y = 0; norm.z = 1;
+	// Back (0, 1, 2, 3)
+	norm.x = 0; norm.y = 0; norm.z = -1;
 	flat_triangle_to_array(cube[0], cube[1], cube[2], norm, obj->surface[0].parameter);
 	flat_triangle_to_array(cube[0], cube[3], cube[2], norm, obj->surface[1].parameter);
 
-	// Back (4, 5, 6, 7)
-	norm.x = 0; norm.y = 0; norm.z = -1;
+	// Front (4, 5, 6, 7)
+	norm.x = 0; norm.y = 0; norm.z = 1;
 	flat_triangle_to_array(cube[4], cube[5], cube[6], norm, obj->surface[2].parameter);
 	flat_triangle_to_array(cube[4], cube[7], cube[6], norm, obj->surface[3].parameter);
 
@@ -208,6 +208,7 @@ objectT *create_cube_object (float x, float y, float z, float d) {
 	norm.x = 0; norm.y = 1; norm.z = 0;
 	flat_triangle_to_array(cube[0], cube[1], cube[4], norm, obj->surface[4].parameter);
 	flat_triangle_to_array(cube[4], cube[5], cube[1], norm, obj->surface[5].parameter);
+
 
 	// Bottom (2, 3, 6, 7)
 	norm.x = 0; norm.y = -1; norm.z = 0;

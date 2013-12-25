@@ -54,8 +54,12 @@ void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 void	render_scene(void)
 {
 	int		i, j;
+	static unsigned long frame = 0;
+	
+	frame ++;
 
 	// Render GL version
+
 
 // TODO: Move lighting definitions to tracer.h
 typedef struct
@@ -66,10 +70,10 @@ typedef struct
   float ambient[4];
 }light_t;
 light_t light={
-      {0,0,-15,0},  //position (the final 1 means the light is positional)
+      {0,5,15,1},  //position (the final 1 means the light is positional)
       {1,1,1,1},    //diffuse
-      {0,0,0,1},    //specular
-      {0,0,0,1} 	//ambient
+      {1,1,1,1},    //specular
+      {1,1,1,1} 	//ambient
     };
 
 glLightfv(GL_LIGHT0,GL_POSITION,light.pos);   	//updates the light's position
@@ -103,12 +107,15 @@ glLightfv(GL_LIGHT0,GL_AMBIENT,light.ambient);    //updates the light's ambient 
 	}
 
 	// Render Ray traced version
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
 	glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
 
-	//ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
+	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
 
@@ -139,7 +146,6 @@ sceneT	*setup_scene (void) {
 
 	s = create_scene ();
 
-/*
 	N = 7;
 	r = 0.1;
 	for (i=0; i<N; i++)
@@ -158,10 +164,11 @@ sceneT	*setup_scene (void) {
 		}
 		add_object_to_scene (s, obj);
 	}
-*/
-	obj = create_cube_object(0, 0, -3, 0.5);
+/*
+	obj = create_cube_object(0, 0, 0, 0.5);
 	color_object(obj, red);
 	add_object_to_scene (s, obj);
+*/
 
 	return (s);
 }
