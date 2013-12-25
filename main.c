@@ -20,23 +20,6 @@ sceneT	*SCENE;
 
 char	*SCREEN_PIXELS;
 
-/*
-objectT *checkerboard (float y, float w, int n) {
-	int	i, j;
-	objectT *obj;
-
-	obj = create_object (n * n * 2);	
-
-	for (i=0; i<n; i++)
-	for (j=0; j<n; j++) {
-		surfaceT *s = &obj->surface[(i*n + j)*2 + 0];
-		s->primative = TRIANGLE;
-	}
-
-	return (obj);
-}
-*/
-
 void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 	int	x, y;
 	
@@ -114,7 +97,7 @@ void	render_scene(void)
 	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
 	glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
 
-	//ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
+	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
 
@@ -147,24 +130,14 @@ sceneT	*setup_scene (void) {
 
 	s = create_scene ();
 
-	N = 7;
-	r = 0.1;
-	for (i=0; i<N; i++)
-	for (j=0; j<N; j++) {
-		float   x, y, z;
-		x = (2.0f * i / (float) (N-1)) - 1.0;
-		z = (2.0f * j / (float) (N-1)) - 1.0;
-		y = -z;
-		z = (z - 1.5) * 5.0;
-		if ((i + j) % 2) {
-			obj = create_cube_object(x, y, z, r);
-			color_object (obj, red);
-		} else {
-			obj = create_sphere_object(x, y, z, r);
-			color_object (obj, green);
-		}
-		add_object_to_scene (s, obj);
-	}
+	r = 0.3;
+
+	obj = create_sphere_object(0, 0, -1, r);
+	color_object (obj, green);
+	add_object_to_scene (s, obj);
+
+	obj = create_checkerboard_object(-r, 2, 20);
+	add_object_to_scene (s, obj);
 
 	l = create_positional_light(0,5,5, white);
 	add_light_to_scene (s, l);

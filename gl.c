@@ -22,7 +22,7 @@ void set_camera (void) {
 	
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();			
-	gluPerspective(fov,aspect,0.01f,100.0f);
+	gluPerspective(fov,aspect,0.1f,100.0f);
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();			
 }

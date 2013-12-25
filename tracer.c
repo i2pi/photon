@@ -22,13 +22,13 @@ void vector_to_array(vectorT *v, float *arr) {
 	arr[2] = v->z;
 }
 
-void parms_to_array(float x, float y, float z, float *arr) {
+void params_to_array(float x, float y, float z, float *arr) {
 	arr[0] = x;
 	arr[1] = y;
 	arr[2] = z;
 }
 
-void parms_to_vector(float x, float y, float z, vectorT *v) {
+void params_to_vector(float x, float y, float z, vectorT *v) {
 	v->x = x;
 	v->y = y;
 	v->z = z;
@@ -184,15 +184,15 @@ objectT *create_cube_object (float x, float y, float z, float d) {
 		init_surface(TRIANGLE, &obj->surface[i]);
 	}
 
-	parms_to_vector (x-d, y+d, z-d, &cube[0]);  // Front, top, left
-	parms_to_vector (x+d, y+d, z-d, &cube[1]);  // Front, top, right 
-	parms_to_vector (x+d, y-d, z-d, &cube[2]);  // Front, bottom, right 
-	parms_to_vector (x-d, y-d, z-d, &cube[3]);  // Front, bottom, left
+	params_to_vector (x-d, y+d, z-d, &cube[0]);  // Front, top, left
+	params_to_vector (x+d, y+d, z-d, &cube[1]);  // Front, top, right 
+	params_to_vector (x+d, y-d, z-d, &cube[2]);  // Front, bottom, right 
+	params_to_vector (x-d, y-d, z-d, &cube[3]);  // Front, bottom, left
 
-	parms_to_vector (x-d, y+d, z+d, &cube[4]);  // Back, top, left
-	parms_to_vector (x+d, y+d, z+d, &cube[5]);  // Back, top, right 
-	parms_to_vector (x+d, y-d, z+d, &cube[6]);  // Back, bottom, right 
-	parms_to_vector (x-d, y-d, z+d, &cube[7]);  // Back, bottom, left
+	params_to_vector (x-d, y+d, z+d, &cube[4]);  // Back, top, left
+	params_to_vector (x+d, y+d, z+d, &cube[5]);  // Back, top, right 
+	params_to_vector (x+d, y-d, z+d, &cube[6]);  // Back, bottom, right 
+	params_to_vector (x-d, y-d, z+d, &cube[7]);  // Back, bottom, left
 
 	// Back (0, 1, 2, 3)
 	norm.x = 0; norm.y = 0; norm.z = -1;
@@ -426,13 +426,66 @@ lightT	*create_positional_light (float x, float y, float z, float color[4]) {
 
 	l = (lightT *) malloc (sizeof(lightT));
 
-	parms_to_vector (x,y,z, &l->position);
+	params_to_vector (x,y,z, &l->position);
 	
 	memcpy (l->color, color, sizeof(float)*4);
 
 	l->gl_draw = positional_light_gl_draw;
 
 	return (l);
+}
+
+objectT *create_checkerboard_object (float y, float width, int n) {
+    int i, j;
+    objectT *obj;
+    float w = 2.0 * width / (float) (n-1);
+	vectorT norm;
+
+	params_to_vector (0, 1, 0, &norm);
+
+    obj = create_object (n * n * 2);    
+
+	for (i=0; i<obj->surfaces; i++) {
+		init_surface(TRIANGLE, &obj->surface[i]);
+	}
+
+    for (i=0; i<n; i++)
+    for (j=0; j<n; j++) {
+		float x,z;
+		float color[4];
+		surfaceT *s;
+
+		if ((i+j) % 2) {
+			color[0] = 1.0;	
+			color[1] = 1.0;	
+			color[2] = 1.0;	
+			color[3] = 1.0;	
+		} else {
+			color[0] = 0.0;	
+			color[1] = 0.0;	
+			color[2] = 1.0;	
+			color[3] = 1.0;	
+		}
+
+		x = 2.0*width*((i / (float)(n-1)) - 0.5);
+		z = 2.0*width*((j / (float)(n-1)) - 0.5);
+		
+        s = &obj->surface[(i*n + j)*2 + 0];
+		params_to_array (x,y,z, &s->parameter[0]);
+		params_to_array (x+w,y,z, &s->parameter[3]);
+		params_to_array (x+w,y,z+w, &s->parameter[6]);
+		vector_to_array (&norm, &s->parameter[9]);
+		memcpy (s->color, color, sizeof(float) * 4);
+
+        s = &obj->surface[(i*n + j)*2 + 1];
+		params_to_array (x,y,z, &s->parameter[0]);
+		params_to_array (x,y,z+w, &s->parameter[3]);
+		params_to_array (x+w,y,z+w, &s->parameter[6]);
+		vector_to_array (&norm, &s->parameter[9]);
+		memcpy (s->color, color, sizeof(float) * 4);
+    }
+
+    return (obj);
 }
 
 rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
