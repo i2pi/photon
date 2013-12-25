@@ -1,6 +1,8 @@
 #ifndef __TRACER_H__
 #define __TRACER_H__
 
+#include "gl.h" // For GLenum
+
 typedef struct {
 	float	x, y, z;
 } vectorT;
@@ -45,10 +47,23 @@ typedef struct {
 	surfaceT	*surface;
 } objectT;
 
+typedef struct lightT {
+	// TODO: we'll just do positional lights for now
+	vectorT	position;
+	float	color[4];
+
+	GLenum	GL_LIGHT;
+	void	(*gl_draw)(struct lightT *self);
+} lightT;
+
 typedef struct {
 	int		objects;
-	objectT **object;	// TODO: single deref
-	int		allocated;
+	objectT **object;	
+	int		object_array_size;
+
+	int		lights;
+	lightT	**light;
+	int		light_array_size;
 } sceneT;
 
 
@@ -56,10 +71,13 @@ typedef struct {
 ** SCENE MANAGEMENT
 */
 void 	init_primitives (void);
+objectT *create_object (int surfaces);
 objectT *create_cube_object (float x, float y, float z, float d);
 objectT *create_sphere_object (float x, float y, float z, float d);
+lightT	*create_positional_light (float x, float y, float z, float color[4]);
 sceneT *create_scene (void);
 void    add_object_to_scene (sceneT *s, objectT *o);
+void    add_light_to_scene (sceneT *s, lightT *o);
 
 /* 
 ** SURFACE PROPERTIES

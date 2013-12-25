@@ -31,7 +31,9 @@ void init_gl (int argc, char **argv);
 void gl_sphere (float x, float y, float z, float r, int segments);
 void gl_cube(float x, float y, float z, float d);
 void gl_triangle(float *vertex);
+void gl_positional_light(GLenum light, float x, float y, float z, float *color);
 void set_camera();
+
 
 extern void render_scene (void);
 

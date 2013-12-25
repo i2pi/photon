@@ -20,6 +20,23 @@ sceneT	*SCENE;
 
 char	*SCREEN_PIXELS;
 
+/*
+objectT *checkerboard (float y, float w, int n) {
+	int	i, j;
+	objectT *obj;
+
+	obj = create_object (n * n * 2);	
+
+	for (i=0; i<n; i++)
+	for (j=0; j<n; j++) {
+		surfaceT *s = &obj->surface[(i*n + j)*2 + 0];
+		s->primative = TRIANGLE;
+	}
+
+	return (obj);
+}
+*/
+
 void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 	int	x, y;
 	
@@ -60,34 +77,16 @@ void	render_scene(void)
 
 	// Render GL version
 
-
-// TODO: Move lighting definitions to tracer.h
-typedef struct
-{
-  float pos[4];
-  float diffuse[4];
-  float specular[4];
-  float ambient[4];
-}light_t;
-light_t light={
-      {0,5,15,1},  //position (the final 1 means the light is positional)
-      {1,1,1,1},    //diffuse
-      {1,1,1,1},    //specular
-      {1,1,1,1} 	//ambient
-    };
-
-glLightfv(GL_LIGHT0,GL_POSITION,light.pos);   	//updates the light's position
-glLightfv(GL_LIGHT0,GL_DIFFUSE,light.diffuse);    //updates the light's diffuse colour
-glLightfv(GL_LIGHT0,GL_SPECULAR,light.specular);  //updates the light's specular colour
-glLightfv(GL_LIGHT0,GL_AMBIENT,light.ambient);    //updates the light's ambient colour
-
-
 	set_camera();
 	glViewport(0, 0, gui_state.w/2, gui_state.h);		
 
 	glClearColor(1,1,1,1);
 	glClearDepth(1);				
     glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+
+	for (i=0; i<SCENE->lights; i++) {
+		SCENE->light[i]->gl_draw(SCENE->light[i]);
+	}
 
 	for (i=0; i<SCENE->objects; i++) {
 		objectT *obj = SCENE->object[i];
@@ -115,7 +114,7 @@ glLightfv(GL_LIGHT0,GL_AMBIENT,light.ambient);    //updates the light's ambient 
 	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
 	glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
 
-	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
+	//ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
 
@@ -138,11 +137,13 @@ glLightfv(GL_LIGHT0,GL_AMBIENT,light.ambient);    //updates the light's ambient 
 
 sceneT	*setup_scene (void) {
 	sceneT	*s;
+	lightT	*l;
 	objectT	*obj;
 	int	i, j, N;
 	float r;
 	float red[4] =   {1, 0, 0, 1};
 	float green[4] = {0, 1, 0, 1};
+	float white[4] = {1, 1, 1, 1};
 
 	s = create_scene ();
 
@@ -164,11 +165,9 @@ sceneT	*setup_scene (void) {
 		}
 		add_object_to_scene (s, obj);
 	}
-/*
-	obj = create_cube_object(0, 0, 0, 0.5);
-	color_object(obj, red);
-	add_object_to_scene (s, obj);
-*/
+
+	l = create_positional_light(0,5,5, white);
+	add_light_to_scene (s, l);
 
 	return (s);
 }

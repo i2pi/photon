@@ -382,20 +382,57 @@ sceneT *create_scene (void) {
 	sceneT 	*s;
 
 	s = (sceneT *) malloc (sizeof(sceneT));
-	s->allocated = 1024;
+	s->object_array_size = 1024;
 	s->objects = 0;
-	s->object = (objectT **) malloc (sizeof(objectT *) * s->allocated);
+	s->object = (objectT **) malloc (sizeof(objectT *) * s->object_array_size);
+
+	s->light_array_size = 8;
+	s->lights = 0;
+	s->light = (lightT **) malloc (sizeof(lightT *) * s->light_array_size);
 
 	return (s);
 }
 
 void	add_object_to_scene (sceneT *s, objectT *o) {
-	if (s->objects >= s->allocated-1)  {
-		fprintf (stderr, "TODO: grow scene\n");
+	if (s->objects >= s->object_array_size-1)  {
+		fprintf (stderr, "TODO: grow scene objects\n");
 		exit (-1);
 	}
 
 	s->object[s->objects++] = o;
+}
+
+void	add_light_to_scene (sceneT *s, lightT *l) {
+	GLenum gl_lights[] = {GL_LIGHT0, GL_LIGHT1, GL_LIGHT2, GL_LIGHT3, GL_LIGHT4};
+
+	if (s->lights >= s->light_array_size-1)  {
+		fprintf (stderr, "TODO: grow scene lights\n");
+		exit (-1);
+	}
+
+	l->GL_LIGHT = gl_lights[s->lights];
+
+	s->light[s->lights++] = l;
+}
+
+void positional_light_gl_draw (lightT *self) {
+	gl_positional_light(self->GL_LIGHT, 
+		self->position.x, self->position.y, self->position.z, self->color);
+}
+
+lightT	*create_positional_light (float x, float y, float z, float color[4]) {
+	lightT *l;
+	
+
+	l = (lightT *) malloc (sizeof(lightT));
+
+	parms_to_vector (x,y,z, &l->position);
+	
+	memcpy (l->color, color, sizeof(float)*4);
+
+	l->gl_draw = positional_light_gl_draw;
+
+	return (l);
 }
 
 rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {

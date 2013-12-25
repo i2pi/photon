@@ -16,7 +16,6 @@
 
 sceneT	*SCENE;
 
-
 void set_camera (void) {
 	float	fov = 45.0f;
 	float	aspect = 1.0f;
@@ -26,6 +25,22 @@ void set_camera (void) {
 	gluPerspective(fov,aspect,0.01f,100.0f);
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();			
+}
+
+void gl_positional_light(GLenum light, float x, float y, float z, float *color) {
+	
+	float pos[4];
+	float nil[4] = {0,0,0,0};
+	pos[0] = x;
+	pos[1] = y;
+	pos[2] = z;
+	pos[3] = 1.0; // Indicates this is a positional light
+
+	glEnable(light);                   	
+	glLightfv (light, GL_POSITION, pos);
+	glLightfv (light, GL_DIFFUSE, color);
+	glLightfv (light, GL_SPECULAR, color);
+	glLightfv (light, GL_AMBIENT, nil);
 }
 
 void ReSizeGLScene(int Width, int Height)
@@ -225,8 +240,6 @@ void init_gl(int argc, char **argv)
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	glEnable(GL_LIGHTING);                 	//enables lighting
-	glEnable(GL_LIGHT0);                   	//enables a light
-//	glLightModeli(GL_LIGHT_MODEL_TWO_SIDE,0);  
 	glEnable(GL_COLOR_MATERIAL);
 
 	gui_state.w = Width;
