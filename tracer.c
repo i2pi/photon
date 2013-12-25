@@ -78,6 +78,11 @@ float	dot_vector (vectorT *a, vectorT *b) {
 	return (d);
 }
 
+float	cosine_vector (vectorT *a, vectorT *b) {
+	// (a . b) / (|a| |b|)
+	return (dot_vector(a,b) / (length_vector(a) * length_vector(b)));
+}
+
 void cross_vector(vectorT *a, vectorT *b, vectorT *v) {
 	// v = a x b
 	v->x = a->y * b->z - b->y * a->z; 
@@ -94,6 +99,13 @@ void project_vector (vectorT *a, vectorT *b, vectorT *v) {
 	v->z *= d;
 }
 
+void scale_vector (vectorT *v, float s) {
+	// v = s * v
+	v->x *= s;
+	v->y *= s;
+	v->z *= s;
+}
+
 void scale_offset_vector (vectorT *a, vectorT *d, float s, vectorT *v) {
 	// v = a + (s * d)
 
@@ -102,7 +114,7 @@ void scale_offset_vector (vectorT *a, vectorT *d, float s, vectorT *v) {
 	v->z = a->z + s * d->z;
 }
 
-void triangle_normal (vectorT *a, vectorT *b, vectorT *c, vectorT *n) {
+void triangle_normal_vector (vectorT *a, vectorT *b, vectorT *c, vectorT *n) {
 	vectorT v1, v2;
 
 	diff_vector(a, b, &v1);
@@ -114,6 +126,7 @@ void triangle_normal (vectorT *a, vectorT *b, vectorT *c, vectorT *n) {
 primitiveT	*create_primitive(char *name, 
 					void (*gl_draw)(float *p), 
 					char (*ray_intersects)(float *p, rayT *r, vectorT *i), 
+					void (*normal)(float *p, vectorT *pt, vectorT *n),
 					int parameters, 
 					...) {
 	va_list	ap;
@@ -130,6 +143,7 @@ primitiveT	*create_primitive(char *name,
 	p->name = strdup(name);
 	p->gl_draw = gl_draw;
 	p->ray_intersects = ray_intersects;
+	p->normal = normal;
 	p->parameters = parameters;
 
 	p->parameter_name = (char **) malloc (sizeof(char *) * parameters);
@@ -287,7 +301,6 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 			// No intersection
 			return (0);
 		} else {
-
 			float dist = sqrt(
 							powf(radius,2.0f) - 
 							powf(dist_vector(&pc, &sphere_center), 2.0f)
@@ -363,13 +376,23 @@ void color_object (objectT *obj, float *color) {
 	}
 }
 
+void	sphere_normal(float *parameter, vectorT *point, vectorT *normal) {
+	vectorT center;
+	array_to_vector(parameter, &center);
+	diff_vector(&center, point, normal);
+	normalize_vector(normal);
+}
+
+void	triangle_normal(float *parameter, vectorT *point, vectorT *normal) {
+	array_to_vector(&parameter[9], normal);
+}
 
 void init_primitives (void) {
 	//CUBE = create_primitive("cube", cube_gl_draw, null_ray_intersects,
 	//						4, "x", "y", "z", "d");
-	SPHERE = create_primitive("sphere", sphere_gl_draw, ray_sphere_intersection,
+	SPHERE = create_primitive("sphere", sphere_gl_draw, ray_sphere_intersection, sphere_normal,
 							4, "x", "y", "z", "r");
-	TRIANGLE = create_primitive("triangle", triangle_gl_draw, ray_triangle_intersection,
+	TRIANGLE = create_primitive("triangle", triangle_gl_draw, ray_triangle_intersection, triangle_normal,
 							12, "x1", "y1", "z1", 
 							   "x2", "y2", "z2", 
 							   "x3", "y3", "z3",
@@ -499,7 +522,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 	int	i, j;
 
 	float	nearest_distance = 9e99;
-	vectorT	nearest;
+	vectorT	nearest_intersection;
 	char	found_hit = 0;
 
 	surfaceT *surface;
@@ -522,7 +545,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 				if (distance < nearest_distance)  {
 					nearest_distance = distance;
-					nearest = intersection;
+					nearest_intersection = intersection;
 					surface = surf;		
 				}
 			}
@@ -531,6 +554,35 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	if (!found_hit) return(NULL);
 
+	// Get incident light at the point of intersection on the surface
+
+	for (i=0; i<4; i++) ray->color[i] = 0;
+
+	for (i=0; i<scene->lights; i++) {
+		lightT	*light;
+		vectorT	incidence;
+		vectorT	normal;
+		float	distance;
+		float	cosine;
+
+		light = scene->light[i];
+
+		diff_vector(&light->position, &nearest_intersection, &incidence);
+		distance = length_vector(&incidence);
+		normalize_vector(&incidence);
+
+		surface->primitive->normal(surface->parameter, &nearest_intersection, &normal);
+		cosine = cosine_vector(&normal, &incidence);
+
+		if (cosine <= 0) continue;
+
+		for (j=0; j<4; j++) {
+			ray->color[j] += surface->color[j] * light->color[j] * cosine / 
+				(1 + distance * 0.01);
+		}
+	}
+
+
 	// Send reflection ray
 	// Send refraction rays
 
@@ -538,7 +590,6 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 	// - Difussion 
 	// - Scattering
 
-	memcpy (ray->color, surface->color, sizeof(float) * 4);
 	
 	return (ray);
 }

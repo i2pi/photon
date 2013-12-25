@@ -1,4 +1,5 @@
 - Single pass ray illumination
+- make distinction between flat and curved triangles
 - reflection
 - refraction
 - metropolis rays

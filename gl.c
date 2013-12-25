@@ -210,8 +210,6 @@ void draw_pixels_to_texture (char *pixels, int w, int h, int tex_id) {
 	glTexImage2D (GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels);
 }
 
-
-
 void init_gl(int argc, char **argv)
 {
 	int	Width = 512;

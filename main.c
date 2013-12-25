@@ -55,7 +55,7 @@ void	render_scene(void)
 {
 	int		i, j;
 	static unsigned long frame = 0;
-	
+
 	frame ++;
 
 	// Render GL version
@@ -63,7 +63,7 @@ void	render_scene(void)
 	set_camera();
 	glViewport(0, 0, gui_state.w/2, gui_state.h);		
 
-	glClearColor(1,1,1,1);
+	glClearColor(0,0,0,0);
 	glClearDepth(1);				
     glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
@@ -97,7 +97,7 @@ void	render_scene(void)
 	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
 	glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
 
-	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
+	if (frame == 2) ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
 
@@ -122,9 +122,7 @@ sceneT	*setup_scene (void) {
 	sceneT	*s;
 	lightT	*l;
 	objectT	*obj;
-	int	i, j, N;
 	float r;
-	float red[4] =   {1, 0, 0, 1};
 	float green[4] = {0, 1, 0, 1};
 	float white[4] = {1, 1, 1, 1};
 
@@ -133,13 +131,16 @@ sceneT	*setup_scene (void) {
 	r = 0.3;
 
 	obj = create_sphere_object(0, 0, -1, r);
-	color_object (obj, green);
+	color_object (obj, white);
 	add_object_to_scene (s, obj);
 
 	obj = create_checkerboard_object(-r, 2, 20);
 	add_object_to_scene (s, obj);
 
-	l = create_positional_light(0,5,5, white);
+	l = create_positional_light(-3,15,0, green);
+	add_light_to_scene (s, l);
+
+	l = create_positional_light(20,20,0, white);
 	add_light_to_scene (s, l);
 
 	return (s);

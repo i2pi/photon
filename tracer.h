@@ -19,11 +19,9 @@ typedef struct {
 	int		parameters;
 	char	**parameter_name;
 
-	// Methods:
-	// - ray-primitive intersection 
-
 	void	(*gl_draw)(float *parameter);
 	char	(*ray_intersects)(float *parameter, rayT *ray, vectorT *intersection);
+	void	(*normal)(float *parameter, vectorT *point, vectorT *normal);
 } primitiveT;
 
 typedef struct {
@@ -99,10 +97,11 @@ void normalize_vector (vectorT *v);
 void diff_vector (vectorT *a, vectorT *b, vectorT *v);
 float dist_vector (vectorT *a, vectorT *b);
 float	dot_vector (vectorT *a, vectorT *b);
+float   cosine_vector (vectorT *a, vectorT *b);
 void cross_vector(vectorT *a, vectorT *b, vectorT *v);
 void project_vector (vectorT *a, vectorT *b, vectorT *v);
 void scale_offset_vector (vectorT *a, vectorT *d, float s, vectorT *v);
-void triangle_normal (vectorT *a, vectorT *b, vectorT *c, vectorT *n);
+void triangle_normal_vector (vectorT *a, vectorT *b, vectorT *c, vectorT *n);
 
 /*
 ** RAY CASTING
