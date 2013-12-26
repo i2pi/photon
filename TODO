@@ -1,5 +1,4 @@
-- Single pass ray illumination // Needs fixing
-- reflection
 - make distinction between flat and curved triangles
 - refraction
 - metropolis rays
+- source and sink paths
