@@ -1,4 +1,3 @@
-- Single pass ray illumination // Needs fixing
 - intersection test on illumination
 - bounding boxes for objects / intersection tests
 - make distinction between flat and curved triangles

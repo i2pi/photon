@@ -422,7 +422,7 @@ void color_object (objectT *obj, float *color, float reflectance) {
 void	sphere_normal(float *parameter, vectorT *point, vectorT *normal) {
 	vectorT center;
 	array_to_vector(parameter, &center);
-	diff_vector(&center, point, normal);
+	diff_vector(point, &center, normal);
 	normalize_vector(normal);
 }
 
@@ -620,12 +620,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 		light = scene->light[i];
 
-// HORRIBLE HACK
-if (surface->primitive->name[0] == 's') {
-		diff_vector(&nearest_intersection, &light->position, &incidence);
-} else {
 		diff_vector(&light->position, &nearest_intersection, &incidence);
-}
 
 		distance = length_vector(&incidence);
 		normalize_vector(&incidence);

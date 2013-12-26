@@ -69,7 +69,7 @@ char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, in
 #endif
 
 	memset (&ray.color[0], 0, sizeof(float) * 4);
-	ret = cast_ray (&ray, SCENE, 1);
+	ret = cast_ray (&ray, SCENE, 3);
 	if (ret) {
 		pixels[((y*width) + x)*3 + 0] = clamp(ret->color[0]) * 255;
 		pixels[((y*width) + x)*3 + 1] = clamp(ret->color[1]) * 255;
@@ -196,6 +196,7 @@ sceneT	*setup_scene (void) {
 	float r;
 	float green[4] = {0, 1, 0, 1};
 	float white[4] = {1, 1, 1, 1};
+	float pink[4] = {1, 0.2, 0.2, 1};
 
 	s = create_scene ();
 
@@ -205,11 +206,10 @@ sceneT	*setup_scene (void) {
 	color_object (obj, white, 0.2);
 	add_object_to_scene (s, obj);
 
-/*
-	obj = create_sphere_object(-0.1, -r/3.0, -0.5, r/3.0);
-	color_object (obj, white);
+	obj = create_sphere_object(-r/2.0, -r/3.0, 0.5, r/3.0);
+	color_object (obj, pink,0.5);
 	add_object_to_scene (s, obj);
-*/
+
 	obj = create_checkerboard_object(-r*0.75, 1, 10);
 	add_object_to_scene (s, obj);
 
