@@ -25,34 +25,66 @@ float	clamp (float x) {
 	return (1);
 }
 
+#ifdef WIREFRAME
+	#define MAX_RAY_DISPLAY_BUFFER 256
+	rayT ray_display_buffer[MAX_RAY_DISPLAY_BUFFER];
+	int	 ray_display_buffers = 0;
+
+	void add_ray_to_display_buffer (rayT *ray) {
+		int i;
+		i = ray_display_buffers++;
+		if (i >= MAX_RAY_DISPLAY_BUFFER) {
+			i = 0;
+			ray_display_buffers = i;
+		}
+		ray_display_buffer[i] = *ray;
+	}
+
+	void display_ray_buffer(void) {
+		int i;
+		for (i=0; i<ray_display_buffers; i++) {
+			rayT *r = &ray_display_buffer[i];
+			gl_show_ray(r->origin.x, r->origin.y, r->origin.z,
+					    r->direction.x, r->direction.y, r->direction.z);
+		}
+	}
+#endif
+
+
+
+char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, int y, char *pixels) {
+	rayT	ray;
+	rayT 	*ret;
+
+	ray.origin = scene->camera;
+
+	ray.direction.x = 2.0*(x / (float) width) - 1.0;
+	ray.direction.y = 2.0*(y / (float) height) - 1.0;
+	ray.direction.z = -2.445; // TODO: calc from fov
+
+	normalize_vector(&ray.direction);
+
+#ifdef WIREFRAME 
+	add_ray_to_display_buffer(&ray);
+#endif
+
+	memset (&ray.color[0], 0, sizeof(float) * 4);
+	ret = cast_ray (&ray, SCENE, 1);
+	if (ret) {
+		pixels[((y*width) + x)*3 + 0] = clamp(ret->color[0]) * 255;
+		pixels[((y*width) + x)*3 + 1] = clamp(ret->color[1]) * 255;
+		pixels[((y*width) + x)*3 + 2] = clamp(ret->color[2]) * 255;
+		return (1);
+	}
+	return (0);	
+}
+
 void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 	int	x, y;
 	
-	vectorT	camera;
-
-	camera.x = 0;
-	camera.y = 0;
-	camera.z = 0;
-
 	for (y=0; y<height; y++) 
 	for (x=0; x<width; x++) {
-		rayT	ray;
-		rayT 	*ret;
-
-		ray.origin = camera;
-
-		ray.direction.x = 1.0 - 2.0*(x / (float) width);
-		ray.direction.y = 1.0 - 2.0*(y / (float) height);
-		ray.direction.z = 2.445; // TODO: calc from fov
-		normalize_vector(&ray.direction);
-
-		memset (&ray.color[0], 0, sizeof(float) * 4);
-		ret = cast_ray (&ray, SCENE, 2);
-		if (ret) {
-			pixels[((y*width) + x)*3 + 0] = clamp(ret->color[0]) * 255;
-			pixels[((y*width) + x)*3 + 1] = clamp(ret->color[1]) * 255;
-			pixels[((y*width) + x)*3 + 2] = clamp(ret->color[2]) * 255;
-		}
+		single_ray_trace_to_pixels (scene, width, height, x, y, pixels);
 	}
 }
 
@@ -60,17 +92,37 @@ void	render_scene(void)
 {
 	int		i, j;
 	static unsigned long frame = 0;
+	unsigned char key;
 
+	key = get_last_key();
 	frame ++;
 
 	// Render GL version
+//	set_camera();
+	float   fov = 45.0f;
+    float   aspect = 1.0f;
 
-	set_camera();
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluPerspective(fov,aspect,0.1f,100.0f);
+	glTranslatef(0,0,-2);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+	glRotatef(frame*0.01, 0,1,0);
+
 	glViewport(0, 0, gui_state.w/2, gui_state.h);		
 
 	glClearColor(0,0,0,0);
 	glClearDepth(1);				
     glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+
+#ifdef WIREFRAME
+	// Show the camera as axes markers
+	gl_axes_wireframe(SCENE->camera.x, SCENE->camera.y, SCENE->camera.z);
+
+	display_ray_buffer();
+#endif	
 
 	for (i=0; i<SCENE->lights; i++) {
 		SCENE->light[i]->gl_draw(SCENE->light[i]);
@@ -102,9 +154,20 @@ void	render_scene(void)
 	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
 	glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
 
-	if (frame == 2) {
+	if (key == 's') {
+		printf ("Starting render... ");
 		ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
 		printf ("Render complete!\n");
+	} else 
+	if (key == ' ') {
+		int x, y;
+		char hit;
+
+		x = random() % SCREEN_WIDTH;
+		y = random() % SCREEN_HEIGHT;
+		hit = single_ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, x, y, SCREEN_PIXELS);
+		printf ("(%3d,%3d) -> %s\n", x, y, hit ? "Hit" : "miss");
+		
 	}
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
@@ -138,18 +201,16 @@ sceneT	*setup_scene (void) {
 
 	r = 0.3;
 
-	obj = create_sphere_object(-0.2, 0, -1, r);
+	obj = create_sphere_object(0, 0, 0, r);
 	color_object (obj, white, 0.2);
 	add_object_to_scene (s, obj);
+
 /*
 	obj = create_sphere_object(-0.1, -r/3.0, -0.5, r/3.0);
 	color_object (obj, white);
 	add_object_to_scene (s, obj);
 */
-
-
-
-	obj = create_checkerboard_object(-r, 2, 20);
+	obj = create_checkerboard_object(-r*0.75, 1, 10);
 	add_object_to_scene (s, obj);
 
 	l = create_positional_light(-3,15,0, green);
@@ -166,8 +227,106 @@ void init_screen(void) {
 	SCREEN_PIXELS = (char *) calloc (sizeof(char), SCREEN_WIDTH * SCREEN_HEIGHT * 3);
 }
 
+char    ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection);
+void params_to_array(float x, float y, float z, float *arr);
+void params_to_vector(float x, float y, float z, vectorT *v);
+
 int main(int argc, char **argv)
 {  
+	float	parameter[4];
+	rayT	ray;
+	vectorT	intersection;
+	char	hit;
+
+
+printf ("** Branch 0: No Hit\n");
+	// (s)    |-->
+
+	params_to_array (0,0,5, parameter);
+	parameter[3] = 1.0;
+
+	params_to_vector(0,0,3, &ray.origin);
+	params_to_vector(0,0,-1, &ray.direction);
+
+	hit = ray_sphere_intersection(parameter, &ray, &intersection);
+
+	if (hit) {
+		printf ("HIT at %4.2f, %4.2f, %4.2f\n", intersection.x, intersection.y, intersection.z);
+	} else {
+		printf ("No hit\n");
+	}
+
+printf("** Branch 1: (0,0,3)\n");
+
+	// ( |--> ) 
+
+	params_to_array (0,0,4, parameter);
+	parameter[3] = 1.0;
+
+	params_to_vector(0,0,3, &ray.origin);
+	params_to_vector(0,0,-1, &ray.direction);
+
+	hit = ray_sphere_intersection(parameter, &ray, &intersection);
+
+	if (hit) {
+		printf ("HIT at %4.2f, %4.2f, %4.2f\n", intersection.x, intersection.y, intersection.z);
+	} else {
+		printf ("No hit\n");
+	}
+
+printf ("** Branch 2: (0,0,-1)\n");
+
+	// (|->  )
+
+	params_to_array (0,0,0, parameter);
+	parameter[3] = 1.0;
+
+	params_to_vector(0,0,0, &ray.origin);
+	params_to_vector(0,0,-1, &ray.direction);
+
+	hit = ray_sphere_intersection(parameter, &ray, &intersection);
+
+	if (hit) {
+		printf ("HIT at %4.2f, %4.2f, %4.2f\n", intersection.x, intersection.y, intersection.z);
+	} else {
+		printf ("No hit\n");
+	}
+
+printf ("** Branch 3: No Hit\n");
+
+	params_to_array (0,0,0, parameter);
+	parameter[3] = 1.0;
+
+	params_to_vector(0,0,3, &ray.origin);
+	params_to_vector(0,1,1, &ray.direction);
+	normalize_vector(&ray.direction);
+
+	hit = ray_sphere_intersection(parameter, &ray, &intersection);
+
+	if (hit) {
+		printf ("HIT at %4.2f, %4.2f, %4.2f\n", intersection.x, intersection.y, intersection.z);
+	} else {
+		printf ("No hit\n");
+	}
+
+printf ("** Branch 4: (0,0,1)\n");
+	// |->   () 
+
+	params_to_array (0,0,0, parameter);
+	parameter[3] = 1.0;
+
+	params_to_vector(0,0,2, &ray.origin);
+	params_to_vector(0,0,-1, &ray.direction);
+
+	hit = ray_sphere_intersection(parameter, &ray, &intersection);
+
+	if (hit) {
+		printf ("HIT at %4.2f, %4.2f, %4.2f\n", intersection.x, intersection.y, intersection.z);
+	} else {
+		printf ("No hit\n");
+	}
+
+
 	init_primitives();
 
 	SCENE = setup_scene();

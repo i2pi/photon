@@ -15,6 +15,7 @@
 #define PI 3.14159265
 
 sceneT	*SCENE;
+float	tick_length = 0.05;
 
 void set_camera (void) {
 	float	fov = 45.0f;
@@ -30,17 +31,21 @@ void set_camera (void) {
 void gl_positional_light(GLenum light, float x, float y, float z, float *color) {
 	
 	float pos[4];
+#ifndef WIREFRAME
 	float nil[4] = {0,0,0,0};
+#endif
 	pos[0] = x;
 	pos[1] = y;
 	pos[2] = z;
 	pos[3] = 1.0; // Indicates this is a positional light
 
+#ifndef WIREFRAME
 	glEnable(light);                   	
 	glLightfv (light, GL_POSITION, pos);
 	glLightfv (light, GL_DIFFUSE, color);
 	glLightfv (light, GL_SPECULAR, color);
 	glLightfv (light, GL_AMBIENT, nil);
+#endif
 }
 
 void ReSizeGLScene(int Width, int Height)
@@ -73,6 +78,16 @@ void keyPressed(unsigned char key, int x, int y)
       glutDestroyWindow(gui_state.window); 
       exit(0);                   
     }
+
+	gui_state.last_key = key;
+}
+
+unsigned char get_last_key (void) {
+	unsigned char c = gui_state.last_key;
+
+	gui_state.last_key = '\0';
+
+	return (c);
 }
 
 void gl_sphere (float x, float y, float z, float r, int segments) {
@@ -96,7 +111,7 @@ void gl_sphere (float x, float y, float z, float r, int segments) {
 		p_norm[i].z = 0;
 	}	
 
-	glBegin(GL_TRIANGLES);                
+
 
 	for (i=1; i<segments; i++) {
 		float h = r * ((2.0f * i / (float) (segments-1)) - 1.0f);
@@ -116,37 +131,104 @@ void gl_sphere (float x, float y, float z, float r, int segments) {
 		for (j=0; j<segments; j++) {
 			int	n = (j+1) % segments;	
 
+			float	vertex[9];	
+			float	normal[9];
+
 			// pointing up
-			glNormal3f(norm[j].x, norm[j].y, norm[j].z);
-			glVertex3f(circle[j].x, circle[j].y, circle[j].z);	
-			glNormal3f(norm[n].x, norm[n].y, norm[n].z);
-			glVertex3f(circle[n].x, circle[n].y, circle[n].z);	
-			glNormal3f(p_norm[j].x, p_norm[j].y, p_norm[j].z);
-			glVertex3f(p_circle[j].x, p_circle[j].y, p_circle[j].z);	
+			vector_to_array(&norm[j], &normal[0]);
+			vector_to_array(&circle[j], &vertex[0]);
+
+			vector_to_array(&norm[n], &normal[3]);
+			vector_to_array(&circle[n], &vertex[3]);
+
+			vector_to_array(&p_norm[j], &normal[6]);
+			vector_to_array(&p_circle[j], &vertex[6]);
+			gl_triangle (vertex, normal);
 
 			// pointing down
-			glNormal3f(p_norm[j].x, p_norm[j].y, p_norm[j].z);
-			glVertex3f(p_circle[j].x, p_circle[j].y, p_circle[j].z);	
-			glNormal3f(p_norm[n].x, p_norm[n].y, p_norm[n].z);
-			glVertex3f(p_circle[n].x, p_circle[n].y, p_circle[n].z);	
-			glNormal3f(norm[n].x, norm[n].y, norm[n].z);
-			glVertex3f(circle[n].x, circle[n].y, circle[n].z);	
+			vector_to_array(&p_norm[j], &normal[0]);
+			vector_to_array(&p_circle[j], &vertex[0]);
+
+			vector_to_array(&p_norm[n], &normal[3]);
+			vector_to_array(&p_circle[n], &vertex[3]);
+
+			vector_to_array(&norm[n], &normal[6]);
+			vector_to_array(&circle[n], &vertex[6]);
+			gl_triangle (vertex, normal);
 		}
 
 		memcpy (p_circle, circle, sizeof(vectorT) * segments);
 		memcpy (p_norm, norm, sizeof(vectorT) * segments);
 	}
+}
 
+
+void    gl_axes_wireframe (float x, float y, float z) {
+    glBegin(GL_LINES);
+	glColor4f(1,0,0,1);
+    glVertex3f(x, y, z);
+    glVertex3f(x+tick_length, y, z);
+    glEnd();
+
+    glBegin(GL_LINES);
+	glColor4f(0,1,0,1);
+    glVertex3f(x, y, z);
+    glVertex3f(x, y+tick_length, z);
+    glEnd();
+
+    glBegin(GL_LINES);
+	glColor4f(0,0,1,1);
+    glVertex3f(x, y, z);
+    glVertex3f(x, y, z+tick_length);
+    glEnd();
+}
+
+void gl_show_ray_tick (float vertex[3], float normal[3]) {
+	float s = tick_length;
+
+	glBegin(GL_LINES);
+	glColor4f(1,1,0,1);
+	glVertex3f(vertex[0], vertex[1], vertex[2]);
+	glVertex3f(vertex[0]+s*normal[0], 
+		vertex[1]+s*normal[1], 
+		vertex[2]+s*normal[2]);
 	glEnd();
 }
 
-void gl_triangle(float *vertex) {
-	glBegin(GL_TRIANGLES);
-	glNormal3f(vertex[9], vertex[10], vertex[11]);
-	glVertex3f(vertex[0], vertex[1], vertex[2]);
-	glVertex3f(vertex[3], vertex[4], vertex[5]);
-	glVertex3f(vertex[6], vertex[7], vertex[8]);
+void gl_show_ray (float ox, float oy, float oz, float dx, float dy, float dz) {
+	float s = 99;
+
+	glBegin(GL_LINES);
+	glColor4f(1,1,1,1);
+	glVertex3f(ox, oy, oz);
+	glVertex3f(ox+s*dx, oy+s*dy, oz+s*dz);
 	glEnd();
+}
+
+
+
+void gl_triangle(float *vertex, float *normal) {
+#ifndef WIREFRAME
+	glBegin(GL_TRIANGLES);
+#else
+	glBegin(GL_LINES);
+#endif
+	glColor4f(0,1,0,1);
+	glVertex3f(vertex[0], vertex[1], vertex[2]);
+	glNormal3f(vertex[0], vertex[1], vertex[2]);
+	glVertex3f(vertex[3], vertex[4], vertex[5]);
+	glNormal3f(vertex[3], vertex[4], vertex[5]);
+	glVertex3f(vertex[6], vertex[7], vertex[8]);
+	glNormal3f(vertex[6], vertex[7], vertex[8]);
+#ifdef WIREFRAME
+	glVertex3f(vertex[0], vertex[1], vertex[2]);
+	glNormal3f(vertex[0], vertex[1], vertex[2]);
+#endif
+	glEnd();
+
+#ifdef WIREFRAME
+	gl_show_ray_tick(&vertex[0], &normal[0]);
+#endif
 }
 
 void gl_cube(float x, float y, float z, float d)
@@ -237,7 +319,9 @@ void init_gl(int argc, char **argv)
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+#ifndef WIREFRAME
 	glEnable(GL_LIGHTING);                 	//enables lighting
+#endif
 	glEnable(GL_COLOR_MATERIAL);
 
 	gui_state.w = Width;

@@ -99,6 +99,16 @@ void project_vector (vectorT *a, vectorT *b, vectorT *v) {
 	v->z *= d;
 }
 
+void project_point_on_ray (rayT *ray, vectorT *point, vectorT *projection) {
+	vectorT pr;
+	float   d;
+
+	diff_vector (point, &ray->origin, &pr);
+	d = dot_vector(&pr, &ray->direction);
+    
+	scale_offset_vector(&ray->origin, &ray->direction, d, projection);
+}
+
 void scale_vector (vectorT *v, float s) {
 	// v = s * v
 	v->x *= s;
@@ -115,7 +125,7 @@ void scale_offset_vector (vectorT *a, vectorT *d, float s, vectorT *v) {
 }
 
 void reflect_vector (vectorT *v, vectorT *n, vectorT *r) {
-	// r = 2*n*(v . n) - v
+	// r = v - 2*n*(v . n)
 	float	dot;
 	vectorT a;
 
@@ -176,11 +186,18 @@ void cube_gl_draw(float *parameter) {
 }
 
 void sphere_gl_draw(float *parameter) {
-	gl_sphere(parameter[0], parameter[1], parameter[2], parameter[3], 100);
+	gl_sphere(parameter[0], parameter[1], parameter[2], parameter[3], 20);
 }
 
 void triangle_gl_draw(float *parameter) {
-	gl_triangle(parameter);
+	float normal[9];
+	int	i;
+	for (i=0; i<3; i++) {
+		normal[3*i + 0] = parameter[9];
+		normal[3*i + 1] = parameter[10];
+		normal[3*i + 2] = parameter[11];
+	}
+	gl_triangle(parameter, normal);
 }
 
 objectT *create_object (int surfaces) {
@@ -281,38 +298,46 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 	vectorT sphere_center;
 	float	radius;
 	float	vpc_len;
+	vectorT	pc;
 
 	sphere_center.x = parameter[0];
 	sphere_center.y = parameter[1];
 	sphere_center.z = parameter[2];
 	radius = parameter[3];
 
-	diff_vector(&ray->origin, &sphere_center, &vpc);
+	diff_vector(&sphere_center, &ray->origin, &vpc);
 	vpc_len = length_vector(&vpc);
+
+	project_point_on_ray (ray, &sphere_center, &pc);
 	
 	if (dot_vector(&vpc, &ray->direction) < 0) {
-		// The ray origin is inside the sphere
 		if (vpc_len > radius) {
 			// No intersection
+//printf ("BRANCH 0/4\n");
 			return (0);
 		} else 
 		if (vpc_len == radius) {
-			// Glances surface
+			// Ray starts at surface
+//printf ("BRANCH 1/4\n");
 			*intersection = ray->origin;
+			return (1);
 		} else {
-			// Pierces
-			fprintf (stderr, "TODO\n");
-			return (0);
+//printf ("BRANCH 2/4\n");
+			float	dist, d;
+
+			dist = sqrt(
+							powf(radius,2.0f) - 
+							powf(dist_vector(&pc, &sphere_center), 2.0f)
+						);
+			d = dist - dist_vector(&pc, &ray->origin);
+	
+			scale_offset_vector (&ray->origin, &ray->direction, d, intersection);
+			return (1);
 		}
 	} else {
-		// Outside the sphere
-		vectorT pc;
-
-		//project_vector (&sphere_center, &ray->direction, &pc);
-		project_vector (&ray->direction, &sphere_center, &pc);
-
 		if (dist_vector(&sphere_center, &pc) > radius) {
 			// No intersection
+//printf ("BRANCH 3/4\n");
 			return (0);
 		} else {
 			float dist = sqrt(
@@ -322,17 +347,20 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 			float	d;
 
 			if (vpc_len > radius) {
+//printf ("BRANCH 4a/4\n");
 				d = dist_vector(&pc, &ray->origin) - dist;
 			} else {
+//printf ("BRANCH 4b/4\n");
 				d = dist_vector(&pc, &ray->origin) + dist;
 			} 
-			intersection->x = ray->origin.x - ray->direction.x * d;
-			intersection->y = ray->origin.y - ray->direction.y * d;
-			intersection->z = ray->origin.z - ray->direction.z * d;
+			scale_offset_vector (&ray->origin, &ray->direction, d, intersection);
+			return (1);
 		}
 	}
-	
-	return (1);
+
+	fprintf (stderr, "shouldn't be here\n");
+	exit (-1);	
+	return (0);
 }
 
 char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersection) {
@@ -374,7 +402,7 @@ char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersecti
 
 	t = f * dot_vector(&e2, &q);
 
-	if (t < 0.00001) {
+	if (t > 0.00001) {
 		scale_offset_vector (&ray->origin, &ray->direction, t, intersection);
 		return (1);
 	} 
@@ -427,6 +455,8 @@ sceneT *create_scene (void) {
 	s->light_array_size = 8;
 	s->lights = 0;
 	s->light = (lightT **) malloc (sizeof(lightT *) * s->light_array_size);
+
+	params_to_vector(0,0,1, &s->camera);
 
 	return (s);
 }
@@ -491,6 +521,7 @@ objectT *create_checkerboard_object (float y, float width, int n) {
     for (j=0; j<n; j++) {
 		float x,z;
 		float color[4];
+		float ref;
 		surfaceT *s;
 
 		if ((i+j) % 2) {
@@ -498,11 +529,13 @@ objectT *create_checkerboard_object (float y, float width, int n) {
 			color[1] = 1.0;	
 			color[2] = 1.0;	
 			color[3] = 1.0;	
+			ref = 0;
 		} else {
 			color[0] = 0.0;	
 			color[1] = 0.0;	
-			color[2] = 1.0;	
+			color[2] = 1.0;
 			color[3] = 1.0;	
+			ref = 0;
 		}
 
 		x = 2.0*width*((i / (float)(n-1)) - 0.5);
@@ -514,6 +547,7 @@ objectT *create_checkerboard_object (float y, float width, int n) {
 		params_to_array (x+w,y,z+w, &s->parameter[6]);
 		vector_to_array (&norm, &s->parameter[9]);
 		memcpy (s->color, color, sizeof(float) * 4);
+		s->properties.reflectance = ref;
 
         s = &obj->surface[(i*n + j)*2 + 1];
 		params_to_array (x,y,z, &s->parameter[0]);
@@ -521,6 +555,7 @@ objectT *create_checkerboard_object (float y, float width, int n) {
 		params_to_array (x+w,y,z+w, &s->parameter[6]);
 		vector_to_array (&norm, &s->parameter[9]);
 		memcpy (s->color, color, sizeof(float) * 4);
+		s->properties.reflectance = ref;
     }
 
     return (obj);
@@ -557,11 +592,10 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 				// We have a hit!
 				float	distance;
 
-				found_hit = 1;
-
 				distance = dist_vector(&intersection, &ray->origin);
 
-				if (distance < nearest_distance)  {
+				if ((distance < nearest_distance) && (distance > 0.001))  {
+					found_hit = 1;
 					nearest_distance = distance;
 					nearest_intersection = intersection;
 					surface = surf;		
@@ -586,12 +620,13 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 		light = scene->light[i];
 
-// TODO: HORRIBLE HACK AROUND A BUG ELSEWHERE
-if (!strcmp(surface->primitive->name, "sphere")) {
+// HORRIBLE HACK
+if (surface->primitive->name[0] == 's') {
 		diff_vector(&nearest_intersection, &light->position, &incidence);
 } else {
 		diff_vector(&light->position, &nearest_intersection, &incidence);
 }
+
 		distance = length_vector(&incidence);
 		normalize_vector(&incidence);
 
@@ -608,13 +643,15 @@ if (!strcmp(surface->primitive->name, "sphere")) {
 	// Send reflection ray
 
 	if (surface->properties.reflectance > 0) {
-		rayT	reflection_ray;
+		rayT	reflection_ray, *ret;
 
 		for (i=0; i<4; i++) reflection_ray.color[i] = 0;
 		reflection_ray.origin = nearest_intersection;
 		reflect_vector(&ray->direction, &normal, &reflection_ray.direction);
-		cast_ray(&reflection_ray, scene, depth-1);
-		for (i=0; i<4; i++) ray->color[i] += reflection_ray.color[i] * surface->properties.reflectance;
+		ret = cast_ray(&reflection_ray, scene, depth-1);
+		if (ret) {
+			for (i=0; i<4; i++) ray->color[i] += reflection_ray.color[i] * surface->properties.reflectance;
+		}
 	}
 
 	// Send refraction rays

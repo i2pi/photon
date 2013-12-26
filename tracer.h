@@ -56,6 +56,8 @@ typedef struct lightT {
 } lightT;
 
 typedef struct {
+	vectorT	camera;
+
 	int		objects;
 	objectT **object;	
 	int		object_array_size;
