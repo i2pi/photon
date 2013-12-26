@@ -20,6 +20,11 @@ sceneT	*SCENE;
 
 char	*SCREEN_PIXELS;
 
+float	clamp (float x) {
+	if (x < 1) return (x);
+	return (1);
+}
+
 void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 	int	x, y;
 	
@@ -42,11 +47,11 @@ void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 		normalize_vector(&ray.direction);
 
 		memset (&ray.color[0], 0, sizeof(float) * 4);
-		ret = cast_ray (&ray, SCENE, 5);
+		ret = cast_ray (&ray, SCENE, 2);
 		if (ret) {
-			pixels[((y*width) + x)*3 + 0] = ret->color[0] * 255;
-			pixels[((y*width) + x)*3 + 1] = ret->color[1] * 255;
-			pixels[((y*width) + x)*3 + 2] = ret->color[2] * 255;
+			pixels[((y*width) + x)*3 + 0] = clamp(ret->color[0]) * 255;
+			pixels[((y*width) + x)*3 + 1] = clamp(ret->color[1]) * 255;
+			pixels[((y*width) + x)*3 + 2] = clamp(ret->color[2]) * 255;
 		}
 	}
 }
@@ -97,7 +102,10 @@ void	render_scene(void)
 	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
 	glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
 
-	if (frame == 2) ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
+	if (frame == 2) {
+		ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
+		printf ("Render complete!\n");
+	}
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
 
@@ -130,9 +138,16 @@ sceneT	*setup_scene (void) {
 
 	r = 0.3;
 
-	obj = create_sphere_object(0, 0, -1, r);
+	obj = create_sphere_object(-0.2, 0, -1, r);
+	color_object (obj, white, 0.2);
+	add_object_to_scene (s, obj);
+/*
+	obj = create_sphere_object(-0.1, -r/3.0, -0.5, r/3.0);
 	color_object (obj, white);
 	add_object_to_scene (s, obj);
+*/
+
+
 
 	obj = create_checkerboard_object(-r, 2, 20);
 	add_object_to_scene (s, obj);

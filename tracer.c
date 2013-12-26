@@ -114,6 +114,20 @@ void scale_offset_vector (vectorT *a, vectorT *d, float s, vectorT *v) {
 	v->z = a->z + s * d->z;
 }
 
+void reflect_vector (vectorT *v, vectorT *n, vectorT *r) {
+	// r = 2*n*(v . n) - v
+	float	dot;
+	vectorT a;
+
+	a = *n;
+
+	dot = dot_vector(v, n);
+
+	scale_vector(&a, 2.0 * dot);
+	diff_vector(v, &a, r);
+	normalize_vector(r);
+}
+
 void triangle_normal_vector (vectorT *a, vectorT *b, vectorT *c, vectorT *n) {
 	vectorT v1, v2;
 
@@ -183,7 +197,7 @@ objectT *create_object (int surfaces) {
 void	init_surface (primitiveT *p, surfaceT *surf) {
 	surf->primitive = p;	
 	surf->parameter = (float *) malloc (sizeof(float) * p->parameters);
-	surf->properties = NULL;
+	surf->properties.reflectance = 0.0f;
 }
 
 objectT *create_cube_object (float x, float y, float z, float d) {
@@ -288,7 +302,7 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 		} else {
 			// Pierces
 			fprintf (stderr, "TODO\n");
-			exit(-1);
+			return (0);
 		}
 	} else {
 		// Outside the sphere
@@ -312,9 +326,9 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 			} else {
 				d = dist_vector(&pc, &ray->origin) + dist;
 			} 
-			intersection->x = ray->origin.x + ray->direction.x * d;
-			intersection->y = ray->origin.y + ray->direction.y * d;
-			intersection->z = ray->origin.z + ray->direction.z * d;
+			intersection->x = ray->origin.x - ray->direction.x * d;
+			intersection->y = ray->origin.y - ray->direction.y * d;
+			intersection->z = ray->origin.z - ray->direction.z * d;
 		}
 	}
 	
@@ -368,11 +382,12 @@ char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersecti
 	return (0);
 }
 
-void color_object (objectT *obj, float *color) {
+void color_object (objectT *obj, float *color, float reflectance) {
 	int	i;
 
 	for (i=0; i<obj->surfaces; i++) {
 		memcpy(obj->surface[i].color, color, sizeof(float) * 4);
+		obj->surface[i].properties.reflectance = reflectance;
 	}
 }
 
@@ -526,6 +541,9 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 	char	found_hit = 0;
 
 	surfaceT *surface;
+	vectorT	 normal;
+
+	if (depth < 0) return (ray); 
 
 	for (i=0; i<scene->objects; i++) {
 		objectT *obj = scene->object[i];
@@ -558,20 +576,25 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	for (i=0; i<4; i++) ray->color[i] = 0;
 
+	surface->primitive->normal(surface->parameter, &nearest_intersection, &normal);
+
 	for (i=0; i<scene->lights; i++) {
 		lightT	*light;
 		vectorT	incidence;
-		vectorT	normal;
 		float	distance;
 		float	cosine;
 
 		light = scene->light[i];
 
+// TODO: HORRIBLE HACK AROUND A BUG ELSEWHERE
+if (!strcmp(surface->primitive->name, "sphere")) {
+		diff_vector(&nearest_intersection, &light->position, &incidence);
+} else {
 		diff_vector(&light->position, &nearest_intersection, &incidence);
+}
 		distance = length_vector(&incidence);
 		normalize_vector(&incidence);
 
-		surface->primitive->normal(surface->parameter, &nearest_intersection, &normal);
 		cosine = cosine_vector(&normal, &incidence);
 
 		if (cosine <= 0) continue;
@@ -582,8 +605,18 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		}
 	}
 
-
 	// Send reflection ray
+
+	if (surface->properties.reflectance > 0) {
+		rayT	reflection_ray;
+
+		for (i=0; i<4; i++) reflection_ray.color[i] = 0;
+		reflection_ray.origin = nearest_intersection;
+		reflect_vector(&ray->direction, &normal, &reflection_ray.direction);
+		cast_ray(&reflection_ray, scene, depth-1);
+		for (i=0; i<4; i++) ray->color[i] += reflection_ray.color[i] * surface->properties.reflectance;
+	}
+
 	// Send refraction rays
 
 	// By Metropolis:
