@@ -1,9 +1,5 @@
-- put camera in scene
-- trace one ray per frame, with keyboard for stepping
-- map out normals and rays and wireframes
 - Single pass ray illumination // Needs fixing
 - intersection test on illumination
-- reflection
 - bounding boxes for objects / intersection tests
 - make distinction between flat and curved triangles
 - refraction
