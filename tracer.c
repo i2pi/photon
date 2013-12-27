@@ -312,17 +312,13 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 	
 	if (dot_vector(&vpc, &ray->direction) < 0) {
 		if (vpc_len > radius) {
-			// No intersection
-//printf ("BRANCH 0/4\n");
 			return (0);
 		} else 
 		if (vpc_len == radius) {
 			// Ray starts at surface
-//printf ("BRANCH 1/4\n");
 			*intersection = ray->origin;
 			return (1);
 		} else {
-//printf ("BRANCH 2/4\n");
 			float	dist, d;
 
 			dist = sqrt(
@@ -337,7 +333,6 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 	} else {
 		if (dist_vector(&sphere_center, &pc) > radius) {
 			// No intersection
-//printf ("BRANCH 3/4\n");
 			return (0);
 		} else {
 			float dist = sqrt(
@@ -347,10 +342,8 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 			float	d;
 
 			if (vpc_len > radius) {
-//printf ("BRANCH 4a/4\n");
 				d = dist_vector(&pc, &ray->origin) - dist;
 			} else {
-//printf ("BRANCH 4b/4\n");
 				d = dist_vector(&pc, &ray->origin) + dist;
 			} 
 			scale_offset_vector (&ray->origin, &ray->direction, d, intersection);
@@ -525,17 +518,17 @@ objectT *create_checkerboard_object (float y, float width, int n) {
 		surfaceT *s;
 
 		if ((i+j) % 2) {
-			color[0] = 1.0;	
-			color[1] = 1.0;	
-			color[2] = 1.0;	
+			color[0] = 0.8;
+			color[1] = 0.8;
+			color[2] = 0.8;
 			color[3] = 1.0;	
-			ref = 0;
+			ref = 0.2;
 		} else {
 			color[0] = 0.0;	
 			color[1] = 0.0;	
-			color[2] = 1.0;
+			color[2] = 0.0;
 			color[3] = 1.0;	
-			ref = 0;
+			ref = 1.0;
 		}
 
 		x = 2.0*width*((i / (float)(n-1)) - 0.5);

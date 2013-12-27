@@ -13,8 +13,8 @@
 #define ESCAPE 27
 
 #define SCREEN_TEXTURE_ID	1
-#define SCREEN_WIDTH		256
-#define SCREEN_HEIGHT		256
+#define SCREEN_WIDTH		512
+#define SCREEN_HEIGHT		512
 
 sceneT	*SCENE;
 
@@ -196,6 +196,7 @@ sceneT	*setup_scene (void) {
 	float r;
 	float green[4] = {0, 1, 0, 1};
 	float white[4] = {1, 1, 1, 1};
+	float sky[4] = {0.4, 0.8, 0.95, 1};
 	float pink[4] = {1, 0.2, 0.2, 1};
 
 	s = create_scene ();
@@ -210,13 +211,17 @@ sceneT	*setup_scene (void) {
 	color_object (obj, pink,0.5);
 	add_object_to_scene (s, obj);
 
-	obj = create_checkerboard_object(-r*0.75, 1, 10);
+	obj = create_sphere_object(0.5, -r/3.0, -0.5, r/3.0);
+	color_object (obj, sky,0.5);
 	add_object_to_scene (s, obj);
 
-	l = create_positional_light(-3,15,0, green);
+	obj = create_checkerboard_object(-r*0.75, 1, 20);
+	add_object_to_scene (s, obj);
+
+	l = create_positional_light(3,2,3, green);
 	add_light_to_scene (s, l);
 
-	l = create_positional_light(20,20,0, white);
+	l = create_positional_light(0,5,0, white);
 	add_light_to_scene (s, l);
 
 	return (s);
@@ -227,106 +232,8 @@ void init_screen(void) {
 	SCREEN_PIXELS = (char *) calloc (sizeof(char), SCREEN_WIDTH * SCREEN_HEIGHT * 3);
 }
 
-char    ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection);
-void params_to_array(float x, float y, float z, float *arr);
-void params_to_vector(float x, float y, float z, vectorT *v);
-
 int main(int argc, char **argv)
 {  
-	float	parameter[4];
-	rayT	ray;
-	vectorT	intersection;
-	char	hit;
-
-
-printf ("** Branch 0: No Hit\n");
-	// (s)    |-->
-
-	params_to_array (0,0,5, parameter);
-	parameter[3] = 1.0;
-
-	params_to_vector(0,0,3, &ray.origin);
-	params_to_vector(0,0,-1, &ray.direction);
-
-	hit = ray_sphere_intersection(parameter, &ray, &intersection);
-
-	if (hit) {
-		printf ("HIT at %4.2f, %4.2f, %4.2f\n", intersection.x, intersection.y, intersection.z);
-	} else {
-		printf ("No hit\n");
-	}
-
-printf("** Branch 1: (0,0,3)\n");
-
-	// ( |--> ) 
-
-	params_to_array (0,0,4, parameter);
-	parameter[3] = 1.0;
-
-	params_to_vector(0,0,3, &ray.origin);
-	params_to_vector(0,0,-1, &ray.direction);
-
-	hit = ray_sphere_intersection(parameter, &ray, &intersection);
-
-	if (hit) {
-		printf ("HIT at %4.2f, %4.2f, %4.2f\n", intersection.x, intersection.y, intersection.z);
-	} else {
-		printf ("No hit\n");
-	}
-
-printf ("** Branch 2: (0,0,-1)\n");
-
-	// (|->  )
-
-	params_to_array (0,0,0, parameter);
-	parameter[3] = 1.0;
-
-	params_to_vector(0,0,0, &ray.origin);
-	params_to_vector(0,0,-1, &ray.direction);
-
-	hit = ray_sphere_intersection(parameter, &ray, &intersection);
-
-	if (hit) {
-		printf ("HIT at %4.2f, %4.2f, %4.2f\n", intersection.x, intersection.y, intersection.z);
-	} else {
-		printf ("No hit\n");
-	}
-
-printf ("** Branch 3: No Hit\n");
-
-	params_to_array (0,0,0, parameter);
-	parameter[3] = 1.0;
-
-	params_to_vector(0,0,3, &ray.origin);
-	params_to_vector(0,1,1, &ray.direction);
-	normalize_vector(&ray.direction);
-
-	hit = ray_sphere_intersection(parameter, &ray, &intersection);
-
-	if (hit) {
-		printf ("HIT at %4.2f, %4.2f, %4.2f\n", intersection.x, intersection.y, intersection.z);
-	} else {
-		printf ("No hit\n");
-	}
-
-printf ("** Branch 4: (0,0,1)\n");
-	// |->   () 
-
-	params_to_array (0,0,0, parameter);
-	parameter[3] = 1.0;
-
-	params_to_vector(0,0,2, &ray.origin);
-	params_to_vector(0,0,-1, &ray.direction);
-
-	hit = ray_sphere_intersection(parameter, &ray, &intersection);
-
-	if (hit) {
-		printf ("HIT at %4.2f, %4.2f, %4.2f\n", intersection.x, intersection.y, intersection.z);
-	} else {
-		printf ("No hit\n");
-	}
-
-
 	init_primitives();
 
 	SCENE = setup_scene();
