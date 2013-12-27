@@ -215,6 +215,7 @@ void	init_surface (primitiveT *p, surfaceT *surf) {
 	surf->primitive = p;	
 	surf->parameter = (float *) malloc (sizeof(float) * p->parameters);
 	surf->properties.reflectance = 0.0f;
+	surf->properties.roughness = 0.0f;
 }
 
 objectT *create_cube_object (float x, float y, float z, float d) {
@@ -403,12 +404,13 @@ char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersecti
 	return (0);
 }
 
-void color_object (objectT *obj, float *color, float reflectance) {
+void color_object (objectT *obj, float *color, float reflectance, float roughness) {
 	int	i;
 
 	for (i=0; i<obj->surfaces; i++) {
 		memcpy(obj->surface[i].color, color, sizeof(float) * 4);
 		obj->surface[i].properties.reflectance = reflectance;
+		obj->surface[i].properties.roughness = roughness;
 	}
 }
 
@@ -587,6 +589,15 @@ char	line_of_sight(sceneT *scene, vectorT *a, vectorT *b) {
 	return (1);
 }
 
+void perturb_vector (vectorT *a, float s, vectorT *p) {
+	// todo: uniform sampling in a cone
+	p->x = a->x + s*(1.0 - 0.5*random() / (float) RAND_MAX);	
+	p->y = a->y + s*(1.0 - 0.5*random() / (float) RAND_MAX);	
+	p->z = a->z + s*(1.0 - 0.5*random() / (float) RAND_MAX);	
+	normalize_vector(p);
+}
+
+
 rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	// Find the nearest intersection
@@ -667,13 +678,21 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	if (surface->properties.reflectance > 0) {
 		rayT	reflection_ray, *ret;
+		vectorT	rough_normal;
+		int	j, N = 1;
 
 		for (i=0; i<4; i++) reflection_ray.color[i] = 0;
-		reflection_ray.origin = nearest_intersection;
-		reflect_vector(&ray->direction, &normal, &reflection_ray.direction);
-		ret = cast_ray(&reflection_ray, scene, depth-1);
-		if (ret) {
-			for (i=0; i<4; i++) ray->color[i] += reflection_ray.color[i] * surface->properties.reflectance;
+	
+		// todo: better mechanism for sampling rather than hard coding stuff	
+		if (surface->properties.roughness > 0) N = 8;
+		for (j=0; j<N; j++) {
+			reflection_ray.origin = nearest_intersection;
+			perturb_vector(&normal, surface->properties.roughness, &rough_normal);
+			reflect_vector(&ray->direction, &rough_normal, &reflection_ray.direction);
+			ret = cast_ray(&reflection_ray, scene, depth-1);
+			if (ret) {
+				for (i=0; i<4; i++) ray->color[i] += reflection_ray.color[i] * surface->properties.reflectance / (float) N;
+			}
 		}
 	}
 

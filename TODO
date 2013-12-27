@@ -1,4 +1,3 @@
-- surface roughness
 - bounding boxes for objects / intersection tests
 - make distinction between flat and curved triangles
 - refraction

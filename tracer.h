@@ -31,6 +31,7 @@ typedef struct {
 	//  transparency (by wavelength)
 	//  diffusion (by angle)
 	float	reflectance;
+	float	roughness;
 } surface_propertiesT;
 
 typedef struct {
@@ -84,7 +85,7 @@ void    add_light_to_scene (sceneT *s, lightT *o);
 /* 
 ** SURFACE PROPERTIES
 */
-void color_object (objectT *obj, float *color, float reflectance);
+void color_object (objectT *obj, float *color, float reflectance, float roughness);
 
 /*
 ** VECTOR OPS
