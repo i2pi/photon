@@ -554,6 +554,39 @@ objectT *create_checkerboard_object (float y, float width, int n) {
     return (obj);
 }
 
+char	line_of_sight(sceneT *scene, vectorT *a, vectorT *b) {
+	// Can a see b in this scene?
+
+	rayT	ray;
+	int	i, j;
+
+	ray.origin = *a;
+	diff_vector(b, a, &ray.direction);
+	normalize_vector(&ray.direction);
+
+	// again, done stupidly
+
+	for (i=0; i<scene->objects; i++) {
+		objectT *obj = scene->object[i];
+
+		for (j=0; j<obj->surfaces; j++) {
+			vectorT 	intersection;
+			surfaceT 	*surf = &obj->surface[j];
+			primitiveT *p = surf->primitive;
+
+			if (p->ray_intersects(surf->parameter, &ray, &intersection)) {
+				// Make sure we're not self-intersecting...
+				if ((dist_vector(a, &intersection) > 0.001) &&
+				    (dist_vector(b, &intersection) > 0.001)) {
+					return (0);
+				}
+			}
+		}
+	}
+
+	return (1);
+}
+
 rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	// Find the nearest intersection
@@ -612,6 +645,8 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		float	cosine;
 
 		light = scene->light[i];
+
+		if (!line_of_sight(scene, &nearest_intersection, &light->position)) continue;
 
 		diff_vector(&light->position, &nearest_intersection, &incidence);
 

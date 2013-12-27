@@ -206,23 +206,24 @@ sceneT	*setup_scene (void) {
 	obj = create_sphere_object(0, 0, 0, r);
 	color_object (obj, white, 0.2);
 	add_object_to_scene (s, obj);
-
+/*
 	obj = create_sphere_object(-r/2.0, -r/3.0, 0.5, r/3.0);
 	color_object (obj, pink,0.5);
 	add_object_to_scene (s, obj);
+*/
 
 	obj = create_sphere_object(0.5, -r/3.0, -0.5, r/3.0);
 	color_object (obj, sky,0.5);
 	add_object_to_scene (s, obj);
 
-	obj = create_checkerboard_object(-r*0.75, 1, 20);
+	obj = create_checkerboard_object(-r*0.75, 1, 5);
 	add_object_to_scene (s, obj);
 
-	l = create_positional_light(3,2,3, green);
+	l = create_positional_light(3,2,3, white);
 	add_light_to_scene (s, l);
 
-	l = create_positional_light(0,5,0, white);
-	add_light_to_scene (s, l);
+//	l = create_positional_light(0,5,0, white);
+//	add_light_to_scene (s, l);
 
 	return (s);
 }
