@@ -53,6 +53,10 @@ char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, in
 
 void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 	int	x, y;
+	struct timeval start, end;
+	float elapsed;
+
+	gettimeofday(&start, NULL);
 	
 	for (y=0; y<height; y++) {
 		for (x=0; x<width; x++) {
@@ -60,6 +64,12 @@ void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 		}
 		printf ("%4.2f%%\n", y*100.0 / (float) height);
 	}
+
+	gettimeofday(&end, NULL);
+
+	elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1e6f;
+
+	printf ("Done in %4.2f sec\n", elapsed);
 }
 
 void	render_scene(void)
@@ -196,7 +206,13 @@ sceneT	*setup_scene (void) {
 	color_object (obj, white, 0.1,0.02, 0.9, 1.8);
 	add_object_to_scene (s, obj);
 
+/*
 	obj = create_checkerboard_object(-0.15, 2, 3);
+	add_object_to_scene (s, obj);
+*/
+
+	obj = create_ortho_plane_object(0, 1, 0, -0.5);
+	color_object (obj, white, 0.3,0.0, 0, 1);
 	add_object_to_scene (s, obj);
 
 	int	L = 8;

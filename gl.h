@@ -37,6 +37,7 @@ void gl_sphere (float x, float y, float z, float r, int segments);
 void gl_cube(float x, float y, float z, float d);
 void gl_triangle(float *vertex, float *normal);
 void gl_positional_light(GLenum light, float x, float y, float z, float *color);
+void gl_ortho_plane (float nx, float ny, float nz, float pos, float W, int N);
 void gl_axes_wireframe (float x, float y, float z);
 void gl_show_ray (float ox, float oy, float oz, float dx, float dy, float dz);
 void set_camera();

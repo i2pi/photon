@@ -10,6 +10,7 @@
 
 primitiveT	*SPHERE;
 primitiveT	*TRIANGLE;
+primitiveT	*ORTHO_PLANE;
 
 void array_to_vector(float *arr, vectorT *v) {
 	v->x = arr[0];
@@ -223,6 +224,11 @@ void triangle_gl_draw(float *parameter) {
 	gl_triangle(parameter, normal);
 }
 
+void ortho_plane_gl_draw(float *parameter) {
+	gl_ortho_plane (parameter[0], parameter[1], parameter[2], parameter[3], 5, 40);
+}
+
+
 objectT *create_object (int surfaces) {
 	objectT *obj;
 
@@ -314,6 +320,24 @@ objectT *create_sphere_object (float x, float y, float z, float r) {
 
 	return (obj);
 }
+
+objectT *create_ortho_plane_object (float nx, float ny, float nz, float pos) {
+	objectT *obj;
+	surfaceT *surf;	
+
+	obj = create_object(1);
+	
+	surf = &obj->surface[0];	
+	init_surface (ORTHO_PLANE, surf);
+	surf->parameter[0] = nx;
+	surf->parameter[1] = ny;
+	surf->parameter[2] = nz;
+	surf->parameter[3] = pos;
+
+	return (obj);
+}
+
+
 
 char	null_ray_intersects (float *parameter, rayT *ray, vectorT *intersection) {
 	return (0);
@@ -430,6 +454,38 @@ char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersecti
 	return (0);
 }
 
+char	ray_ortho_plane_intersection (float *parameter, rayT *ray, vectorT *intersection) {
+	vectorT normal;
+	vectorT pos;
+	float d;
+
+	array_to_vector(&parameter[0], &normal);
+
+	pos = normal;
+	scale_vector(&pos, parameter[3]);
+
+	d = dot_vector(&normal, &ray->direction);
+
+	if (d >= 0) {	
+		return (0);
+	}
+	
+	if (normal.x != 0) {
+		d = (pos.x - ray->origin.x) / ray->direction.x;
+	} else 
+	if (normal.y != 0) {
+		d = (pos.y - ray->origin.y) / ray->direction.y;
+	} else {
+		d = (pos.z - ray->origin.z) / ray->direction.z;
+	}
+
+	scale_offset_vector(&ray->origin, &ray->direction, d, intersection);
+
+	return (1);
+}
+
+
+
 void color_object (objectT *obj, float *color, 
 		float reflectance, 
 		float roughness,
@@ -457,6 +513,10 @@ void	triangle_normal(float *parameter, vectorT *point, vectorT *normal) {
 	array_to_vector(&parameter[9], normal);
 }
 
+void	ortho_plane_normal(float *parameter, vectorT *point, vectorT *normal) {
+	array_to_vector(&parameter[0], normal);
+}
+
 void init_primitives (void) {
 	//CUBE = create_primitive("cube", cube_gl_draw, null_ray_intersects,
 	//						4, "x", "y", "z", "d");
@@ -467,6 +527,10 @@ void init_primitives (void) {
 							   "x2", "y2", "z2", 
 							   "x3", "y3", "z3",
 							   "nx", "ny", "nz");
+
+	ORTHO_PLANE = create_primitive("ortho_plane", ortho_plane_gl_draw, ray_ortho_plane_intersection, ortho_plane_normal,
+							4, "nx", "ny", "nz", "pos");
+
 
 	// todo: plane, lens, aperture
 }
@@ -731,7 +795,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		for (i=0; i<4; i++) reflection_ray.color[i] = 0;
 	
 		// todo: better mechanism for sampling rather than hard coding stuff	
-		if (surface->properties.roughness > 0) N = 4;
+		if (surface->properties.roughness > 0) N = 1;
 		for (j=0; j<N; j++) {
 			reflection_ray.origin = nearest_intersection;
 			perturb_vector(&normal, surface->properties.roughness, &rough_normal);
@@ -753,7 +817,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		for (i=0; i<4; i++) refraction_ray.color[i] = 0;
 	
 		// todo: better mechanism for sampling rather than hard coding stuff	
-		if (surface->properties.roughness > 0) N = 4;
+		if (surface->properties.roughness > 0) N = 1;
 		for (j=0; j<N; j++) {
 			char	refracts = 0;
 			refraction_ray.origin = nearest_intersection;

@@ -230,6 +230,74 @@ void gl_triangle(float *vertex, float *normal) {
 #endif
 }
 
+void gl_ortho_plane (float nx, float ny, float nz, float pos, float W, int N) {
+	float x, y, z;
+	float step;
+	float n[3], v[3];
+
+	int	i, j;
+
+	params_to_array(nx, ny, nz, n);
+
+	step = (2.0f * W) / (float) N;
+
+	if (nx != 0) {
+		// vertical plane
+		for (i=0; i<N; i++)
+		for (j=0; j<N; j++) {
+			x = nx * pos;
+			y = -W + i*step;
+			z = -W + j*step;
+			glBegin(GL_LINES);
+			glColor4f(0,1,0,1);	
+			glVertex3f(x, y, z);
+			glVertex3f(x, y+step, z);
+			glVertex3f(x, y, z+step);
+			glVertex3f(x, y, z);
+			glEnd();	
+			params_to_array(x,y,z, v);
+			gl_show_ray_tick(v, n);
+		}
+	} else 
+	if (ny != 0) {
+		// horitzontal plane
+		for (i=0; i<N; i++)
+		for (j=0; j<N; j++) {
+			x = -W + i*step;
+			y = ny * pos;
+			z = -W + j*step;
+			glBegin(GL_LINES);
+			glColor4f(0,1,0,1);	
+			glVertex3f(x, y, z);
+			glVertex3f(x+step, y, z);
+			glVertex3f(x, y, z+step);
+			glVertex3f(x, y, z);
+			glEnd();	
+			params_to_array(x,y,z, v);
+			gl_show_ray_tick(v, n);
+		}
+	} else {
+		// coronal plane
+		for (i=0; i<N; i++)
+		for (j=0; j<N; j++) {
+			x = -W + i*step;
+			y = -W + j*step;
+			z = nz * pos;
+			glBegin(GL_LINES);
+			glColor4f(0,1,0,1);	
+			glVertex3f(x, y, z);
+			glVertex3f(x+step, y, z);
+			glVertex3f(x, y+step, z);
+			glVertex3f(x, y, z);
+			glEnd();	
+			params_to_array(x,y,z, v);
+			gl_show_ray_tick(v, n);
+		}
+	
+	}
+	
+}
+
 void gl_cube(float x, float y, float z, float d)
 {
   glBegin(GL_QUADS);                // start drawing the cube.

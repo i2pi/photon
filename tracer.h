@@ -82,6 +82,7 @@ objectT *create_object (int surfaces);
 objectT *create_cube_object (float x, float y, float z, float d);
 objectT *create_sphere_object (float x, float y, float z, float d);
 objectT *create_checkerboard_object (float y, float width, int n);
+objectT *create_ortho_plane_object (float nx, float ny, float nz, float pos);
 lightT	*create_positional_light (float x, float y, float z, float color[4]);
 sceneT *create_scene (void);
 void    add_object_to_scene (sceneT *s, objectT *o);
