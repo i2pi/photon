@@ -688,8 +688,10 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 	for (i=0; i<scene->lights; i++) {
 		lightT	*light;
 		vectorT	incidence;
+		vectorT reflection;
 		float	distance;
-		float	cosine;
+		float	diffuse, specular;
+		float	phong;
 
 		light = scene->light[i];
 
@@ -703,13 +705,20 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		distance = length_vector(&incidence);
 		normalize_vector(&incidence);
 
-		cosine = cosine_vector(&normal, &incidence);
 
-		if (cosine <= 0) continue;
+		diffuse = dot_vector(&normal, &incidence); 
 
+		reflect_vector(&incidence, &normal, &reflection);
+		specular = dot_vector(&reflection, &ray->direction);
+
+		if (diffuse < 0) diffuse = 0;
+		if (specular <0) specular= 0;
+
+		phong = (1.0 - surface->properties.transparency) * diffuse * 0.5f +
+				powf(specular, 35.0f) * 0.7f;
+	
 		for (j=0; j<4; j++) {
-			ray->color[j] += (1.0 - surface->properties.transparency) * surface->color[j] * 
-					light->color[j] * cosine / (1 + distance * 0.01);
+			ray->color[j] += phong * surface->color[j] * light->color[j] / (1 + distance * 0.01);
 		}
 	}
 
@@ -723,7 +732,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		for (i=0; i<4; i++) reflection_ray.color[i] = 0;
 	
 		// todo: better mechanism for sampling rather than hard coding stuff	
-		if (surface->properties.roughness > 0) N = 8;
+		if (surface->properties.roughness > 0) N = 4;
 		for (j=0; j<N; j++) {
 			reflection_ray.origin = nearest_intersection;
 			perturb_vector(&normal, surface->properties.roughness, &rough_normal);
@@ -745,7 +754,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		for (i=0; i<4; i++) refraction_ray.color[i] = 0;
 	
 		// todo: better mechanism for sampling rather than hard coding stuff	
-		if (surface->properties.roughness > 0) N = 16;
+		if (surface->properties.roughness > 0) N = 4;
 		for (j=0; j<N; j++) {
 			char	refracts = 0;
 			refraction_ray.origin = nearest_intersection;
