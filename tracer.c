@@ -6,6 +6,7 @@
 
 #include "tracer.h"
 #include "gl.h"
+#include "wireframe.h"
 
 primitiveT	*SPHERE;
 primitiveT	*TRIANGLE;
@@ -138,6 +139,28 @@ void reflect_vector (vectorT *v, vectorT *n, vectorT *r) {
 	normalize_vector(r);
 }
 
+char refract_vector(vectorT *v, vectorT *n, float n1, float n2, vectorT *r) {
+	// r = refraction of v against normal n on boundary of n1:n2
+
+	// http://steve.hollasch.net/cgindex/render/refraction.txt
+	
+   //Vector3  I, N, T;		/* incoming, normal and Transmitted */
+	float eta, c1, cs2 ;
+
+	eta = n1 / n2 ;			
+	c1 = -dot_vector(v, n);
+	cs2 = 1 - eta * eta * (1 - c1 * c1) ;
+
+	if (cs2 < 0)
+		return (0);		// total internal reflection 
+	
+	r->x = eta * v->x + (eta * c1 - sqrt(cs2)) * n->x;
+	r->y = eta * v->y + (eta * c1 - sqrt(cs2)) * n->y;
+	r->z = eta * v->z + (eta * c1 - sqrt(cs2)) * n->z;
+
+	return (1);
+}
+
 void triangle_normal_vector (vectorT *a, vectorT *b, vectorT *c, vectorT *n) {
 	vectorT v1, v2;
 
@@ -216,6 +239,8 @@ void	init_surface (primitiveT *p, surfaceT *surf) {
 	surf->parameter = (float *) malloc (sizeof(float) * p->parameters);
 	surf->properties.reflectance = 0.0f;
 	surf->properties.roughness = 0.0f;
+	surf->properties.transparency = 0.0f;
+	surf->properties.refractive_index = 1.0f;
 }
 
 objectT *create_cube_object (float x, float y, float z, float d) {
@@ -404,13 +429,19 @@ char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersecti
 	return (0);
 }
 
-void color_object (objectT *obj, float *color, float reflectance, float roughness) {
+void color_object (objectT *obj, float *color, 
+		float reflectance, 
+		float roughness,
+		float transparency,
+		float refractive_index) {
 	int	i;
 
 	for (i=0; i<obj->surfaces; i++) {
 		memcpy(obj->surface[i].color, color, sizeof(float) * 4);
 		obj->surface[i].properties.reflectance = reflectance;
 		obj->surface[i].properties.roughness = roughness;
+		obj->surface[i].properties.transparency = transparency;
+		obj->surface[i].properties.refractive_index = refractive_index;
 	}
 }
 
@@ -451,7 +482,9 @@ sceneT *create_scene (void) {
 	s->lights = 0;
 	s->light = (lightT **) malloc (sizeof(lightT *) * s->light_array_size);
 
-	params_to_vector(0,0,1, &s->camera);
+	params_to_vector(0,0,1.1, &s->camera);
+
+	s->refractive_index = 1.0;
 
 	return (s);
 }
@@ -643,6 +676,8 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	if (!found_hit) return(NULL);
 
+	add_seg_to_display_buffer (&ray->origin, &nearest_intersection, 1,1,1);
+
 	// Get incident light at the point of intersection on the surface
 
 	for (i=0; i<4; i++) ray->color[i] = 0;
@@ -657,7 +692,10 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 		light = scene->light[i];
 
-		if (!line_of_sight(scene, &nearest_intersection, &light->position)) continue;
+// TODO: Line of sight needs to take in to account transparent objects -- tricky :P
+//		if (!line_of_sight(scene, &nearest_intersection, &light->position)) continue;
+
+//		add_seg_to_display_buffer (&light->position, &nearest_intersection, 0.5,0.5,0);
 
 		diff_vector(&light->position, &nearest_intersection, &incidence);
 
@@ -669,8 +707,8 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		if (cosine <= 0) continue;
 
 		for (j=0; j<4; j++) {
-			ray->color[j] += surface->color[j] * light->color[j] * cosine / 
-				(1 + distance * 0.01);
+			ray->color[j] += (1.0 - surface->properties.transparency) * surface->color[j] * 
+					light->color[j] * cosine / (1 + distance * 0.01);
 		}
 	}
 
@@ -684,7 +722,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		for (i=0; i<4; i++) reflection_ray.color[i] = 0;
 	
 		// todo: better mechanism for sampling rather than hard coding stuff	
-		if (surface->properties.roughness > 0) N = 8;
+		if (surface->properties.roughness > 0) N = 1;
 		for (j=0; j<N; j++) {
 			reflection_ray.origin = nearest_intersection;
 			perturb_vector(&normal, surface->properties.roughness, &rough_normal);
@@ -697,6 +735,51 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 	}
 
 	// Send refraction rays
+
+	if (surface->properties.transparency > 0) {
+		rayT	refraction_ray, *ret;
+		vectorT	rough_normal;
+		int	j, N = 1;
+
+		for (i=0; i<4; i++) refraction_ray.color[i] = 0;
+	
+		// todo: better mechanism for sampling rather than hard coding stuff	
+		if (surface->properties.roughness > 0) N = 1;
+		for (j=0; j<N; j++) {
+			char	refracts = 0;
+			refraction_ray.origin = nearest_intersection;
+//			perturb_vector(&normal, surface->properties.roughness, &rough_normal);
+			rough_normal = normal;
+			refraction_ray.refractive_index = surface->properties.refractive_index;
+
+			// work out whether the incident ray begins inside or outside of the surface
+			vectorT op;
+			
+			diff_vector(&nearest_intersection, &ray->origin, &op);
+			if (dot_vector(&op, &rough_normal) < 0) {
+				// outside
+				refracts = refract_vector(&ray->direction, &rough_normal, 
+								ray->refractive_index, 
+								refraction_ray.refractive_index,
+								&refraction_ray.direction);
+			} else {
+				// inside
+				// reflect normal
+				scale_vector(&rough_normal, -1.0);
+				refracts = refract_vector(&ray->direction, &rough_normal, 
+								ray->refractive_index, 
+								scene->refractive_index,
+								&refraction_ray.direction);
+			}
+
+			if (refracts) {
+				ret = cast_ray(&refraction_ray, scene, depth-1);
+				if (ret) {
+					for (i=0; i<4; i++) ray->color[i] += refraction_ray.color[i] * surface->properties.transparency / (float) N;
+				}
+			}
+		}
+	}
 
 	// By Metropolis:
 	// - Difussion 

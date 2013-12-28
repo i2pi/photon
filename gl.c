@@ -196,7 +196,7 @@ void gl_show_ray_tick (float vertex[3], float normal[3]) {
 }
 
 void gl_show_ray (float ox, float oy, float oz, float dx, float dy, float dz) {
-	float s = 99;
+	float s = 100;
 
 	glBegin(GL_LINES);
 	glColor4f(1,1,1,1);
@@ -204,7 +204,6 @@ void gl_show_ray (float ox, float oy, float oz, float dx, float dy, float dz) {
 	glVertex3f(ox+s*dx, oy+s*dy, oz+s*dz);
 	glEnd();
 }
-
 
 
 void gl_triangle(float *vertex, float *normal) {
@@ -309,8 +308,6 @@ void init_gl(int argc, char **argv)
     glutKeyboardFunc(&keyPressed);
 
 	glEnable(GL_TEXTURE_2D);
-	glClearColor(1,1,1,0);
-	glClearDepth(0);				
 	glEnable(GL_LINE_SMOOTH);
 	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST); 
 	glDepthFunc(GL_LESS);			   

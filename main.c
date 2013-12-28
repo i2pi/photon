@@ -9,6 +9,7 @@
 
 #include "gl.h"
 #include "tracer.h"
+#include "wireframe.h"
 
 #define ESCAPE 27
 
@@ -25,33 +26,6 @@ float	clamp (float x) {
 	return (1);
 }
 
-#ifdef WIREFRAME
-	#define MAX_RAY_DISPLAY_BUFFER 256
-	rayT ray_display_buffer[MAX_RAY_DISPLAY_BUFFER];
-	int	 ray_display_buffers = 0;
-
-	void add_ray_to_display_buffer (rayT *ray) {
-		int i;
-		i = ray_display_buffers++;
-		if (i >= MAX_RAY_DISPLAY_BUFFER) {
-			i = 0;
-			ray_display_buffers = i;
-		}
-		ray_display_buffer[i] = *ray;
-	}
-
-	void display_ray_buffer(void) {
-		int i;
-		for (i=0; i<ray_display_buffers; i++) {
-			rayT *r = &ray_display_buffer[i];
-			gl_show_ray(r->origin.x, r->origin.y, r->origin.z,
-					    r->direction.x, r->direction.y, r->direction.z);
-		}
-	}
-#endif
-
-
-
 char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, int y, char *pixels) {
 	rayT	ray;
 	rayT 	*ret;
@@ -64,12 +38,10 @@ char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, in
 
 	normalize_vector(&ray.direction);
 
-#ifdef WIREFRAME 
-	add_ray_to_display_buffer(&ray);
-#endif
+	ray.refractive_index = scene->refractive_index;
 
 	memset (&ray.color[0], 0, sizeof(float) * 4);
-	ret = cast_ray (&ray, SCENE, 3);
+	ret = cast_ray (&ray, SCENE, 5);
 	if (ret) {
 		pixels[((y*width) + x)*3 + 0] = clamp(ret->color[0]) * 255;
 		pixels[((y*width) + x)*3 + 1] = clamp(ret->color[1]) * 255;
@@ -154,20 +126,17 @@ void	render_scene(void)
 	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
 	glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
 
-	if (key == 's') {
+	if (frame == 1) {
 		printf ("Starting render... ");
 		ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
 		printf ("Render complete!\n");
-	} else 
-	if (key == ' ') {
+	} else {
 		int x, y;
 		char hit;
 
 		x = random() % SCREEN_WIDTH;
 		y = random() % SCREEN_HEIGHT;
 		hit = single_ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, x, y, SCREEN_PIXELS);
-		printf ("(%3d,%3d) -> %s\n", x, y, hit ? "Hit" : "miss");
-		
 	}
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
@@ -198,24 +167,26 @@ sceneT	*setup_scene (void) {
 	float white[4] = {1, 1, 1, 1};
 	float sky[4] = {0.4, 0.8, 0.95, 1};
 	float pink[4] = {1, 0.2, 0.2, 1};
+	float black[4] = {0,0,0,1};
 
 	s = create_scene ();
 
 	r = 0.3;
 
 	obj = create_sphere_object(0, 0, 0, r);
-	color_object (obj, white, 0.2,0.1);
+	color_object (obj, white, 0.0,0.0, 1.0, 1.0);
 	add_object_to_scene (s, obj);
-
+/*
 	obj = create_sphere_object(-r/2.0, -r/3.0, 0.5, r/3.0);
-	color_object (obj, pink,0.5,0.1);
+	color_object (obj, pink,0.1,0.1, 0.0, 1.0);
 	add_object_to_scene (s, obj);
 
-	obj = create_sphere_object(0.5, -r/3.0, -0.5, r/3.0);
-	color_object (obj, sky,0.5,0.2);
+	obj = create_sphere_object(0.6, r/3.0, -2.0, r);
+	color_object (obj, sky,0.0,0.0, 0, 1);
 	add_object_to_scene (s, obj);
+*/
 
-	obj = create_checkerboard_object(-r*0.75, 1, 20);
+	obj = create_checkerboard_object(-r*0.75, 1, 3);
 	add_object_to_scene (s, obj);
 
 	l = create_positional_light(3,2,3, white);

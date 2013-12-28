@@ -12,6 +12,7 @@ typedef struct {
 	vectorT		origin;
 	vectorT		direction;
 	float		color[4];	//RGBA
+	float		refractive_index;
 } rayT;
 
 typedef struct {
@@ -32,6 +33,8 @@ typedef struct {
 	//  diffusion (by angle)
 	float	reflectance;
 	float	roughness;
+	float	transparency;
+	float	refractive_index;
 } surface_propertiesT;
 
 typedef struct {
@@ -66,6 +69,8 @@ typedef struct {
 	int		lights;
 	lightT	**light;
 	int		light_array_size;
+
+	float	refractive_index;
 } sceneT;
 
 
@@ -85,7 +90,11 @@ void    add_light_to_scene (sceneT *s, lightT *o);
 /* 
 ** SURFACE PROPERTIES
 */
-void color_object (objectT *obj, float *color, float reflectance, float roughness);
+void color_object (objectT *obj, float *color, 
+			float reflectance, 
+			float roughness,
+			float transparency,
+			float refractive_index);
 
 /*
 ** VECTOR OPS
