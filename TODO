@@ -1,4 +1,3 @@
-- refraction
 - objects that emit light / light maps
 - aperture
 - lens stack
@@ -6,4 +5,4 @@
 //- make checkerboard infinite plane with procedural texture checkers
 //- bounding boxes for objects / intersection tests
 //- make distinction between flat and curved triangles
-//- metropolis rays
+//- metropolis ray paths

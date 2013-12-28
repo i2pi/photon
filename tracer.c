@@ -479,7 +479,7 @@ sceneT *create_scene (void) {
 	s->objects = 0;
 	s->object = (objectT **) malloc (sizeof(objectT *) * s->object_array_size);
 
-	s->light_array_size = 8;
+	s->light_array_size = 64;
 	s->lights = 0;
 	s->light = (lightT **) malloc (sizeof(lightT *) * s->light_array_size);
 
@@ -506,8 +506,7 @@ void	add_light_to_scene (sceneT *s, lightT *l) {
 		fprintf (stderr, "TODO: grow scene lights\n");
 		exit (-1);
 	}
-
-	l->GL_LIGHT = gl_lights[s->lights];
+	if (s->lights < 8) l->GL_LIGHT = gl_lights[s->lights];
 
 	s->light[s->lights++] = l;
 }
@@ -697,7 +696,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 // TODO: Line of sight needs to take in to account transparent objects -- tricky :P
 		if (!line_of_sight(scene, &nearest_intersection, &light->position)) continue;
 
-//		add_seg_to_display_buffer (&light->position, &nearest_intersection, 0.5,0.5,0);
+		add_seg_to_display_buffer (&light->position, &nearest_intersection, 0.5,0.5,0);
 
 		diff_vector(&light->position, &nearest_intersection, &incidence);
 
@@ -724,7 +723,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		for (i=0; i<4; i++) reflection_ray.color[i] = 0;
 	
 		// todo: better mechanism for sampling rather than hard coding stuff	
-		if (surface->properties.roughness > 0) N = 1;
+		if (surface->properties.roughness > 0) N = 8;
 		for (j=0; j<N; j++) {
 			reflection_ray.origin = nearest_intersection;
 			perturb_vector(&normal, surface->properties.roughness, &rough_normal);
@@ -746,7 +745,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		for (i=0; i<4; i++) refraction_ray.color[i] = 0;
 	
 		// todo: better mechanism for sampling rather than hard coding stuff	
-		if (surface->properties.roughness > 0) N = 1;
+		if (surface->properties.roughness > 0) N = 16;
 		for (j=0; j<N; j++) {
 			char	refracts = 0;
 			refraction_ray.origin = nearest_intersection;

@@ -1,7 +1,7 @@
 INCLUDE = -I/usr/include/
 LIBDIR  = -L/usr/X11R6/lib 
 
-COMPILERFLAGS = -Wall -g
+COMPILERFLAGS = -Wall -O9
 CC = gcc
 CFLAGS = $(COMPILERFLAGS) $(INCLUDE) 
 COMMON_LIBRARIES=
