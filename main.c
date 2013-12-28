@@ -41,7 +41,7 @@ char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, in
 	ray.refractive_index = scene->refractive_index;
 
 	memset (&ray.color[0], 0, sizeof(float) * 4);
-	ret = cast_ray (&ray, SCENE, 5);
+	ret = cast_ray (&ray, SCENE, 10);
 	if (ret) {
 		pixels[((y*width) + x)*3 + 0] = clamp(ret->color[0]) * 255;
 		pixels[((y*width) + x)*3 + 1] = clamp(ret->color[1]) * 255;
@@ -64,6 +64,8 @@ void	render_scene(void)
 {
 	int		i, j;
 	static unsigned long frame = 0;
+	static char pause_rays = 0;
+	static int x = 0, y = 0;
 	unsigned char key;
 
 	key = get_last_key();
@@ -126,17 +128,22 @@ void	render_scene(void)
 	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
 	glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
 
+	switch (key) {
+		case 'p': pause_rays = pause_rays ? 0 : 1; break;
+	}
+
 	if (frame == 1) {
 		printf ("Starting render... ");
 		ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
 		printf ("Render complete!\n");
 	} else {
-		int x, y;
-		char hit;
 
-		x = random() % SCREEN_WIDTH;
-		y = random() % SCREEN_HEIGHT;
-		hit = single_ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, x, y, SCREEN_PIXELS);
+		if (!pause_rays) {
+
+			x = random() % SCREEN_WIDTH;
+			y = random() % SCREEN_HEIGHT;
+			single_ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, x, y, SCREEN_PIXELS);
+		}
 	}
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
@@ -163,7 +170,7 @@ sceneT	*setup_scene (void) {
 	lightT	*l;
 	objectT	*obj;
 	float r;
-	float green[4] = {0, 1, 0, 1};
+	float sea[4] = {0.15, 0.92, 0.66, 1};
 	float white[4] = {1, 1, 1, 1};
 	float sky[4] = {0.4, 0.8, 0.95, 1};
 	float pink[4] = {1, 0.2, 0.2, 1};
@@ -171,25 +178,26 @@ sceneT	*setup_scene (void) {
 
 	s = create_scene ();
 
-	r = 0.3;
-
-	obj = create_sphere_object(0, 0, 0, r);
-	color_object (obj, white, 0.0,0.0, 1.0, 1.0);
-	add_object_to_scene (s, obj);
-/*
-	obj = create_sphere_object(-r/2.0, -r/3.0, 0.5, r/3.0);
-	color_object (obj, pink,0.1,0.1, 0.0, 1.0);
+	obj = create_sphere_object(0.0, 0, 0, 0.1);
+	color_object (obj, sky, 0.2,0.0, 0.0, 1);
 	add_object_to_scene (s, obj);
 
-	obj = create_sphere_object(0.6, r/3.0, -2.0, r);
-	color_object (obj, sky,0.0,0.0, 0, 1);
-	add_object_to_scene (s, obj);
-*/
-
-	obj = create_checkerboard_object(-r*0.75, 1, 3);
+	obj = create_sphere_object(-0.25, 0, 0, 0.1);
+	color_object (obj, sea, 0.2,0.0, 0.0, 1);
 	add_object_to_scene (s, obj);
 
-	l = create_positional_light(3,2,3, white);
+	obj = create_sphere_object(0.25, 0, 0, 0.1);
+	color_object (obj, pink, 0.2,0.0, 0.0, 1);
+	add_object_to_scene (s, obj);
+
+	obj = create_sphere_object(0.02, -0.05, 0.8, 0.05);
+	color_object (obj, white, 0.1,0.01, 0.95, 1.8);
+	add_object_to_scene (s, obj);
+
+	obj = create_checkerboard_object(-0.15, 2, 10);
+	add_object_to_scene (s, obj);
+
+	l = create_positional_light(-3,2,3, white);
 	add_light_to_scene (s, l);
 
 	return (s);
@@ -202,6 +210,33 @@ void init_screen(void) {
 
 int main(int argc, char **argv)
 {  
+/*
+	vectorT	v, n, r;
+	char	refracts;
+
+	int		i;
+
+	printf ("r, vx, vy, vz,   rx, ry, rz\n");
+	for (i=0; i<100; i++) {
+
+		params_to_vector(1,-i/100.0,0, &v);
+		normalize_vector(&v);
+
+		params_to_vector(-1,0,0, &n);
+	
+		refracts = refract_vector(&v, &n, 1.5, 1, &r);
+
+		printf ("%d,  %4.2f, %4.2f, %4.2f,   %4.2f, %4.2f, %4.2f\n",
+				refracts,
+				v.x, v.y, v.z,
+				r.x, r.y, r.z);
+
+	}
+
+	exit (-1);
+*/
+
+	
 	init_primitives();
 
 	SCENE = setup_scene();

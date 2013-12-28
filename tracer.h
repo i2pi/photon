@@ -102,8 +102,8 @@ void color_object (objectT *obj, float *color,
 
 void array_to_vector(float *arr, vectorT *v);
 void vector_to_array(vectorT *v, float *arr);
-void parms_to_array(float x, float y, float z, float *arr);
-void parms_to_vector(float x, float y, float z, vectorT *v);
+void params_to_array(float x, float y, float z, float *arr);
+void params_to_vector(float x, float y, float z, vectorT *v);
 void triangle_to_array (vectorT v1, vectorT v2, vectorT v3, float *triangle);
 float length_vector (vectorT *v);
 void normalize_vector (vectorT *v);
@@ -114,6 +114,7 @@ float   cosine_vector (vectorT *a, vectorT *b);
 void cross_vector(vectorT *a, vectorT *b, vectorT *v);
 void project_vector (vectorT *a, vectorT *b, vectorT *v);
 void reflect_vector (vectorT *v, vectorT *n, vectorT *r);
+char refract_vector(vectorT *v, vectorT *n, float n1, float n2, vectorT *r);
 void scale_offset_vector (vectorT *a, vectorT *d, float s, vectorT *v);
 void triangle_normal_vector (vectorT *a, vectorT *b, vectorT *c, vectorT *n);
 

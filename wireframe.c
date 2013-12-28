@@ -4,7 +4,9 @@
 
 #define WIREFRAME
 
-#define MAX_RAY_DISPLAY_BUFFER 256
+char PRINT_DEBUG = 0;
+
+#define MAX_RAY_DISPLAY_BUFFER 256 
 rayT ray_display_buffer[MAX_RAY_DISPLAY_BUFFER];
 int	 ray_display_idx = 0;
 char ray_display_buffer_full = 0;
@@ -19,6 +21,13 @@ void gl_show_seg (rayT *seg, float color[4]) {
 	glVertex3f(seg->origin.x, seg->origin.y, seg->origin.z);
 	glVertex3f(seg->direction.x, seg->direction.y, seg->direction.z);
 	glEnd();
+}
+
+void reset_wireframe_buffers (void) {
+	seg_display_idx = 0;
+	seg_display_buffer_full = 0;
+	ray_display_idx = 0;
+	ray_display_buffer_full = 0;
 }
 
 

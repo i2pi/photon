@@ -145,11 +145,11 @@ char refract_vector(vectorT *v, vectorT *n, float n1, float n2, vectorT *r) {
 	// http://steve.hollasch.net/cgindex/render/refraction.txt
 	
    //Vector3  I, N, T;		/* incoming, normal and Transmitted */
-	float eta, c1, cs2 ;
+	double eta, c1, cs2 ;
 
 	eta = n1 / n2 ;			
 	c1 = -dot_vector(v, n);
-	cs2 = 1 - eta * eta * (1 - c1 * c1) ;
+	cs2 = 1.0 - pow(eta, 2.0) * (1 - pow(c1, 2.0));
 
 	if (cs2 < 0)
 		return (0);		// total internal reflection 
@@ -367,7 +367,8 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 						);
 			float	d;
 
-			if (vpc_len > radius) {
+			// epsilon hack :/ 
+			if ((vpc_len + 0.00001) >= radius) {
 				d = dist_vector(&pc, &ray->origin) - dist;
 			} else {
 				d = dist_vector(&pc, &ray->origin) + dist;
@@ -557,13 +558,13 @@ objectT *create_checkerboard_object (float y, float width, int n) {
 			color[1] = 0.8;
 			color[2] = 0.8;
 			color[3] = 1.0;	
-			ref = 0.2;
+			ref = 0.1;
 		} else {
 			color[0] = 0.0;	
 			color[1] = 0.0;	
 			color[2] = 0.0;
 			color[3] = 1.0;	
-			ref = 1.0;
+			ref = 0.3;
 		}
 
 		x = 2.0*width*((i / (float)(n-1)) - 0.5);
@@ -650,6 +651,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	if (depth < 0) return (ray); 
 
+
 	for (i=0; i<scene->objects; i++) {
 		objectT *obj = scene->object[i];
 
@@ -664,7 +666,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 				distance = dist_vector(&intersection, &ray->origin);
 
-				if ((distance < nearest_distance) && (distance > 0.001))  {
+				if ((distance < nearest_distance) && (distance > 0.00001))  {
 					found_hit = 1;
 					nearest_distance = distance;
 					nearest_intersection = intersection;
@@ -693,7 +695,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		light = scene->light[i];
 
 // TODO: Line of sight needs to take in to account transparent objects -- tricky :P
-//		if (!line_of_sight(scene, &nearest_intersection, &light->position)) continue;
+		if (!line_of_sight(scene, &nearest_intersection, &light->position)) continue;
 
 //		add_seg_to_display_buffer (&light->position, &nearest_intersection, 0.5,0.5,0);
 
@@ -748,9 +750,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		for (j=0; j<N; j++) {
 			char	refracts = 0;
 			refraction_ray.origin = nearest_intersection;
-//			perturb_vector(&normal, surface->properties.roughness, &rough_normal);
-			rough_normal = normal;
-			refraction_ray.refractive_index = surface->properties.refractive_index;
+			perturb_vector(&normal, surface->properties.roughness, &rough_normal);
 
 			// work out whether the incident ray begins inside or outside of the surface
 			vectorT op;
@@ -758,25 +758,30 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 			diff_vector(&nearest_intersection, &ray->origin, &op);
 			if (dot_vector(&op, &rough_normal) < 0) {
 				// outside
+				refraction_ray.refractive_index = surface->properties.refractive_index;
 				refracts = refract_vector(&ray->direction, &rough_normal, 
 								ray->refractive_index, 
 								refraction_ray.refractive_index,
 								&refraction_ray.direction);
+
 			} else {
-				// inside
-				// reflect normal
 				scale_vector(&rough_normal, -1.0);
+				refraction_ray.refractive_index = scene->refractive_index;
 				refracts = refract_vector(&ray->direction, &rough_normal, 
 								ray->refractive_index, 
-								scene->refractive_index,
+								refraction_ray.refractive_index,
 								&refraction_ray.direction);
 			}
+
 
 			if (refracts) {
 				ret = cast_ray(&refraction_ray, scene, depth-1);
 				if (ret) {
 					for (i=0; i<4; i++) ray->color[i] += refraction_ray.color[i] * surface->properties.transparency / (float) N;
 				}
+			} else {
+				// TODO: internal reflection
+				printf ("todo\n");
 			}
 		}
 	}
@@ -784,7 +789,6 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 	// By Metropolis:
 	// - Difussion 
 	// - Scattering
-
 	
 	return (ray);
 }
