@@ -705,7 +705,6 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		distance = length_vector(&incidence);
 		normalize_vector(&incidence);
 
-
 		diffuse = dot_vector(&normal, &incidence); 
 
 		reflect_vector(&incidence, &normal, &reflection);
@@ -714,8 +713,8 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		if (diffuse < 0) diffuse = 0;
 		if (specular <0) specular= 0;
 
-		phong = (1.0 - surface->properties.transparency) * diffuse * 0.5f +
-				powf(specular, 35.0f) * 0.7f;
+		phong = (1.0 - surface->properties.transparency) * diffuse * 0.9f +
+				powf(specular, 35.0f) * surface->properties.reflectance;
 	
 		for (j=0; j<4; j++) {
 			ray->color[j] += phong * surface->color[j] * light->color[j] / (1 + distance * 0.01);

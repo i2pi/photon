@@ -14,8 +14,8 @@
 #define ESCAPE 27
 
 #define SCREEN_TEXTURE_ID	1
-#define SCREEN_WIDTH		1024	
-#define SCREEN_HEIGHT		1024
+#define SCREEN_WIDTH		512
+#define SCREEN_HEIGHT		512
 
 sceneT	*SCENE;
 
@@ -196,17 +196,17 @@ sceneT	*setup_scene (void) {
 	color_object (obj, white, 0.1,0.02, 0.9, 1.8);
 	add_object_to_scene (s, obj);
 
-	obj = create_checkerboard_object(-0.15, 2, 6);
+	obj = create_checkerboard_object(-0.15, 2, 3);
 	add_object_to_scene (s, obj);
 
-	int	L = 32;
+	int	L = 8;
 	for (i=0; i<L; i++) {
 		float color[4];
 		color[0] = 1.0 / (float) L;
 		color[1] = color[0];
 		color[2] = color[0];
 		color[3] = color[0];
-		l = create_positional_light(2,2,5+i*0.04, color);
+		l = create_positional_light(3,7,5+i*0.14, color);
 		add_light_to_scene (s, l);
 	}
 
