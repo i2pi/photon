@@ -26,23 +26,20 @@ typedef struct {
 } primitiveT;
 
 typedef struct {
-	// Function pointers:
-	//  reflection (by wavelenth)
-	//  refraction (by wavelenth)
-	//  transparency (by wavelength)
-	//  diffusion (by angle)
+	float	color[4];
 	float	reflectance;
 	float	roughness;
 	float	transparency;
 	float	refractive_index;
 } surface_propertiesT;
 
-typedef struct {
+typedef struct surfaceT {
 	// A surface is an instance of a primitve
 	primitiveT *primitive;
 	float		*parameter;
-	float		color[4];
 	surface_propertiesT properties;
+	// TODO: wavelength dependance
+	void	(*property_function)(struct surfaceT *self, rayT *camera_ray, vectorT *intersection, surface_propertiesT *result);
 } surfaceT;
 
 typedef struct {
@@ -96,6 +93,10 @@ void color_object (objectT *obj, float *color,
 			float roughness,
 			float transparency,
 			float refractive_index);
+
+void set_object_property_function (objectT *obj, void    (*property_function)(struct surfaceT *self, rayT *camera_ray, vectorT *intersection, surface_propertiesT *result));
+
+void    checker_property_function (surfaceT *self, rayT *camera_ray, vectorT *intersection, surface_propertiesT *result);
 
 /*
 ** VECTOR OPS

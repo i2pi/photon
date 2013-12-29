@@ -243,6 +243,7 @@ objectT *create_object (int surfaces) {
 void	init_surface (primitiveT *p, surfaceT *surf) {
 	surf->primitive = p;	
 	surf->parameter = (float *) malloc (sizeof(float) * p->parameters);
+	surf->property_function = NULL;
 	surf->properties.reflectance = 0.0f;
 	surf->properties.roughness = 0.0f;
 	surf->properties.transparency = 0.0f;
@@ -337,6 +338,31 @@ objectT *create_ortho_plane_object (float nx, float ny, float nz, float pos) {
 	return (obj);
 }
 
+void	checker_property_function (surfaceT *self, rayT *camera_ray, vectorT *intersection, surface_propertiesT *result) {
+	// produces a checkerboard in the xz plane
+
+	float scale = 10.0f;
+
+	result->color[0] = 1.0;
+	result->color[1] = 1.0;
+	result->color[2] = 1.0;
+	result->color[3] = 1.0;
+
+	result->reflectance = 0.2;
+	result->roughness = 0.0;
+	result->transparency = 0.0;
+	result->refractive_index = 1.0;
+
+	int a = (int)(5000+(intersection->x * scale)) + (int)(5000+(intersection->z * scale));
+
+	if (a & 1) {
+		result->color[0] = 0.0;
+		result->color[1] = 0.0;
+		result->color[2] = 0.0;
+
+		result->reflectance = 0.95;
+	}
+}
 
 
 char	null_ray_intersects (float *parameter, rayT *ray, vectorT *intersection) {
@@ -494,13 +520,24 @@ void color_object (objectT *obj, float *color,
 	int	i;
 
 	for (i=0; i<obj->surfaces; i++) {
-		memcpy(obj->surface[i].color, color, sizeof(float) * 4);
+		memcpy(obj->surface[i].properties.color, color, sizeof(float) * 4);
 		obj->surface[i].properties.reflectance = reflectance;
 		obj->surface[i].properties.roughness = roughness;
 		obj->surface[i].properties.transparency = transparency;
 		obj->surface[i].properties.refractive_index = refractive_index;
 	}
 }
+
+void set_object_property_function (objectT *obj,
+		void    (*property_function)(struct surfaceT *self, rayT *camera_ray, vectorT *intersection, surface_propertiesT *result)) {
+	int	i;
+
+	for (i=0; i<obj->surfaces; i++) {
+		obj->surface[i].property_function = property_function;
+	}
+}
+
+
 
 void	sphere_normal(float *parameter, vectorT *point, vectorT *normal) {
 	vectorT center;
@@ -638,7 +675,7 @@ objectT *create_checkerboard_object (float y, float width, int n) {
 		params_to_array (x+w,y,z, &s->parameter[3]);
 		params_to_array (x+w,y,z+w, &s->parameter[6]);
 		vector_to_array (&norm, &s->parameter[9]);
-		memcpy (s->color, color, sizeof(float) * 4);
+		memcpy (s->properties.color, color, sizeof(float) * 4);
 		s->properties.reflectance = ref;
 
         s = &obj->surface[(i*n + j)*2 + 1];
@@ -646,7 +683,7 @@ objectT *create_checkerboard_object (float y, float width, int n) {
 		params_to_array (x,y,z+w, &s->parameter[3]);
 		params_to_array (x+w,y,z+w, &s->parameter[6]);
 		vector_to_array (&norm, &s->parameter[9]);
-		memcpy (s->color, color, sizeof(float) * 4);
+		memcpy (s->properties.color, color, sizeof(float) * 4);
 		s->properties.reflectance = ref;
     }
 
@@ -696,7 +733,6 @@ void perturb_vector (vectorT *a, float s, vectorT *p) {
 
 
 rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
-
 	// Find the nearest intersection
 
 	// do this stupidly for now, just iterate through 
@@ -711,6 +747,8 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	surfaceT *surface;
 	vectorT	 normal;
+
+	surface_propertiesT properties;
 
 	if (depth < 0) return (ray); 
 
@@ -742,6 +780,15 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 	if (!found_hit) return(NULL);
 
 	add_seg_to_display_buffer (&ray->origin, &nearest_intersection, 1,1,1);
+
+	if (surface->property_function) {
+		// todo: should probably get different properties for phong vs. diffuse
+		surface->property_function(surface, ray, &nearest_intersection, &properties);
+	} else {
+		properties = surface->properties;
+	}
+
+
 
 	// Get incident light at the point of intersection on the surface
 
@@ -777,17 +824,18 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		if (diffuse < 0) diffuse = 0;
 		if (specular <0) specular= 0;
 
-		phong = (1.0 - surface->properties.transparency) * diffuse * 0.9f +
-				powf(specular, 35.0f) * surface->properties.reflectance;
+		// todo: put shininess in properties
+		phong = (1.0 - properties.transparency) * diffuse * 0.9f +
+				powf(specular, 35.0f) * properties.reflectance;
 	
 		for (j=0; j<4; j++) {
-			ray->color[j] += phong * surface->color[j] * light->color[j] / (1 + distance * 0.01);
+			ray->color[j] += phong * properties.color[j] * light->color[j] / (1 + distance * 0.01);
 		}
 	}
 
 	// Send reflection ray
 
-	if (surface->properties.reflectance > 0) {
+	if (properties.reflectance > 0) {
 		rayT	reflection_ray, *ret;
 		vectorT	rough_normal;
 		int	j, N = 1;
@@ -795,21 +843,21 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		for (i=0; i<4; i++) reflection_ray.color[i] = 0;
 	
 		// todo: better mechanism for sampling rather than hard coding stuff	
-		if (surface->properties.roughness > 0) N = 1;
+		if (properties.roughness > 0) N = 1;
 		for (j=0; j<N; j++) {
 			reflection_ray.origin = nearest_intersection;
-			perturb_vector(&normal, surface->properties.roughness, &rough_normal);
+			perturb_vector(&normal, properties.roughness, &rough_normal);
 			reflect_vector(&ray->direction, &rough_normal, &reflection_ray.direction);
 			ret = cast_ray(&reflection_ray, scene, depth-1);
 			if (ret) {
-				for (i=0; i<4; i++) ray->color[i] += reflection_ray.color[i] * surface->properties.reflectance / (float) N;
+				for (i=0; i<4; i++) ray->color[i] += reflection_ray.color[i] * properties.reflectance / (float) N;
 			}
 		}
 	}
 
 	// Send refraction rays
 
-	if (surface->properties.transparency > 0) {
+	if (properties.transparency > 0) {
 		rayT	refraction_ray, *ret;
 		vectorT	rough_normal;
 		int	j, N = 1;
@@ -817,11 +865,11 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		for (i=0; i<4; i++) refraction_ray.color[i] = 0;
 	
 		// todo: better mechanism for sampling rather than hard coding stuff	
-		if (surface->properties.roughness > 0) N = 1;
+		if (properties.roughness > 0) N = 1;
 		for (j=0; j<N; j++) {
 			char	refracts = 0;
 			refraction_ray.origin = nearest_intersection;
-			perturb_vector(&normal, surface->properties.roughness, &rough_normal);
+			perturb_vector(&normal, properties.roughness, &rough_normal);
 
 			// work out whether the incident ray begins inside or outside of the surface
 			vectorT op;
@@ -829,7 +877,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 			diff_vector(&nearest_intersection, &ray->origin, &op);
 			if (dot_vector(&op, &rough_normal) < 0) {
 				// outside
-				refraction_ray.refractive_index = surface->properties.refractive_index;
+				refraction_ray.refractive_index = properties.refractive_index;
 				refracts = refract_vector(&ray->direction, &rough_normal, 
 								ray->refractive_index, 
 								refraction_ray.refractive_index,
@@ -844,16 +892,16 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 								&refraction_ray.direction);
 			}
 
-
-			if (refracts) {
-				ret = cast_ray(&refraction_ray, scene, depth-1);
-				if (ret) {
-					for (i=0; i<4; i++) ray->color[i] += refraction_ray.color[i] * surface->properties.transparency / (float) N;
-				}
-			} else {
-				// TODO: internal reflection
-				printf ("todo\n");
+			if (!refracts) {
+				// internal reflection
+				reflect_vector(&ray->direction, &normal, &refraction_ray.direction);
 			}
+
+			ret = cast_ray(&refraction_ray, scene, depth-1);
+			if (ret) {
+				for (i=0; i<4; i++) ray->color[i] += refraction_ray.color[i] * properties.transparency / (float) N;
+			}
+	
 		}
 	}
 

@@ -121,7 +121,7 @@ void	render_scene(void)
 			surfaceT *surf = &obj->surface[j];
 
 			// TODO: Make a gl_surface_properties() and put it in gl_draw()
-			glColor4fv (surf->color);
+			glColor4fv (surf->properties.color);
 			glColorMaterial(GL_FRONT,GL_DIFFUSE);	
 			float black[4]={0,0,0,0};
 			glMaterialfv(GL_FRONT,GL_AMBIENT,black);
@@ -186,12 +186,12 @@ sceneT	*setup_scene (void) {
 	float white[4] = {1, 1, 1, 1};
 	float sky[4] = {0.4, 0.8, 0.95, 1};
 	float pink[4] = {1, 0.2, 0.2, 1};
-	float black[4] = {0,0,0,1};
+	float orange[4] = {1,0.7,0.4,1};
 
 	s = create_scene ();
 
 	obj = create_sphere_object(0.0, 0, 0, 0.1);
-	color_object (obj, sky, 0.2,0.1, 0.0, 1);
+	color_object (obj, orange, 0.2,0.1, 0.0, 1);
 	add_object_to_scene (s, obj);
 
 	obj = create_sphere_object(-0.25, 0, 0, 0.1);
@@ -203,7 +203,7 @@ sceneT	*setup_scene (void) {
 	add_object_to_scene (s, obj);
 
 	obj = create_sphere_object(0.02, -0.05, 0.8, 0.05);
-	color_object (obj, white, 0.1,0.02, 0.9, 1.8);
+	color_object (obj, white, 0.1,0.0, 0.9, 1.8);
 	add_object_to_scene (s, obj);
 
 /*
@@ -211,11 +211,15 @@ sceneT	*setup_scene (void) {
 	add_object_to_scene (s, obj);
 */
 
-	obj = create_ortho_plane_object(0, 1, 0, -0.5);
-	color_object (obj, white, 0.3,0.0, 0, 1);
+	obj = create_ortho_plane_object(0, 0, 1, -15);
+	color_object (obj, sky, 0.0,0.0, 0, 1);
 	add_object_to_scene (s, obj);
 
-	int	L = 8;
+	obj = create_ortho_plane_object(0, 1, 0, -0.15);
+	set_object_property_function(obj, checker_property_function);
+	add_object_to_scene (s, obj);
+
+	int	L = 1;
 	for (i=0; i<L; i++) {
 		float color[4];
 		color[0] = 1.0 / (float) L;
