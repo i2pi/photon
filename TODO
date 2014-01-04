@@ -1,6 +1,6 @@
-- aperture
-- lens stack
-
+- negative radii of curvature
+- apertures
+ 
 //- objects that emit light / light maps
 //- kd-tree intersection test
 //- make distinction between flat and curved triangles
