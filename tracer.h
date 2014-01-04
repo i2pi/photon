@@ -3,10 +3,11 @@
 
 #include "gl.h" // For GLenum
 
+#define MAX_LENSES 1024
+
 typedef struct {
 	float	x, y, z;
 } vectorT;
-
 
 typedef struct {
 	vectorT		origin;
@@ -57,7 +58,32 @@ typedef struct lightT {
 } lightT;
 
 typedef struct {
-	vectorT	camera;
+	// r1 & r2 are the curvature radii for the front & back surfaces.
+	// Front is defined by facing the +ve z direction.
+	// The radius is the radius of the lens :P
+	// Only doing spherical lenses for now.
+
+	float	z;
+	float	r1, r2;		
+	float	refractive_index;
+	float	radius;
+	objectT	*object;
+} lensT;
+
+typedef struct {
+	// Sensor is a d x d square at (0, 0, z)
+	// All elements are perpendicular to the z-axis
+	// Sensor is an d x d square
+	// TODO: Apertures
+
+	float	d;
+	float	z;
+	lensT	lens[MAX_LENSES];
+	int		lenses;
+} cameraT;
+
+typedef struct {
+	cameraT	camera;
 
 	int		objects;
 	objectT **object;	
@@ -66,8 +92,6 @@ typedef struct {
 	int		lights;
 	lightT	**light;
 	int		light_array_size;
-
-	float	refractive_index;
 } sceneT;
 
 
@@ -78,12 +102,15 @@ void 	init_primitives (void);
 objectT *create_object (int surfaces);
 objectT *create_cube_object (float x, float y, float z, float d);
 objectT *create_sphere_object (float x, float y, float z, float d);
+objectT *create_lens_object (float z, float r1, float r2, float R);
 objectT *create_checkerboard_object (float y, float width, int n);
 objectT *create_ortho_plane_object (float nx, float ny, float nz, float pos);
 lightT	*create_positional_light (float x, float y, float z, float color[4]);
 sceneT *create_scene (void);
 void    add_object_to_scene (sceneT *s, objectT *o);
 void    add_light_to_scene (sceneT *s, lightT *o);
+void 	add_lens_to_camera (cameraT *camera, 
+			float z, float r1, float r2, float R, float refractive_index);
 
 /* 
 ** SURFACE PROPERTIES
@@ -125,5 +152,6 @@ void triangle_normal_vector (vectorT *a, vectorT *b, vectorT *c, vectorT *n);
 */
 
 rayT    *cast_ray (rayT *ray, sceneT *scene, int depth);
+char    cast_ray_through_camera(rayT *ray, cameraT *camera, rayT *out);
 
 #endif 

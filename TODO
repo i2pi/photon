@@ -2,6 +2,6 @@
 - lens stack
 
 //- objects that emit light / light maps
-//- bounding boxes for objects / intersection tests
+//- kd-tree intersection test
 //- make distinction between flat and curved triangles
 //- metropolis ray paths

@@ -1,3 +1,5 @@
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
 #include <unistd.h> 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,8 +16,12 @@
 #define ESCAPE 27
 
 #define SCREEN_TEXTURE_ID	1
-#define SCREEN_WIDTH		512
-#define SCREEN_HEIGHT		512
+#define SCREEN_WIDTH		256
+#define SCREEN_HEIGHT		256
+
+#define SAMPLES	512
+
+#define PI 3.1415926535
 
 sceneT	*SCENE;
 
@@ -27,10 +33,12 @@ float	clamp (float x) {
 }
 
 char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, int y, char *pixels) {
-	rayT	ray;
+	rayT	ray, camera_ray;
 	rayT 	*ret;
 
-	ray.origin = scene->camera;
+	ray.origin.x = 0.0f;
+	ray.origin.y = 0.0f;
+	ray.origin.z = scene->camera.z;
 
 	ray.direction.x = 2.0*(x / (float) width) - 1.0;
 	ray.direction.y = 2.0*(y / (float) height) - 1.0;
@@ -38,10 +46,13 @@ char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, in
 
 	normalize_vector(&ray.direction);
 
-	ray.refractive_index = scene->refractive_index;
+	ray.refractive_index = 1.0;
 
 	memset (&ray.color[0], 0, sizeof(float) * 4);
-	ret = cast_ray (&ray, SCENE, 4);
+
+	if (!cast_ray_through_camera (&ray, &SCENE->camera, &camera_ray)) return (0);
+	
+	ret = cast_ray (&camera_ray, SCENE, 4);
 	if (ret) {
 		pixels[((y*width) + x)*3 + 0] = clamp(ret->color[0]) * 255;
 		pixels[((y*width) + x)*3 + 1] = clamp(ret->color[1]) * 255;
@@ -50,6 +61,76 @@ char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, in
 	}
 	return (0);	
 }
+
+void	sample_circle (float R, float *x, float *y) {
+	float	t, s;
+
+	t = 2.0 * PI * (random() / (float) RAND_MAX);
+	s = R * (random() / (float) RAND_MAX);
+
+	*x = s * cos(t);
+	*y = s * sin(t);
+}
+
+char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, int y, int samples, char *pixels) {
+	int		i;
+	rayT	ray, camera_ray;
+	rayT 	*ret;
+	char	hit;
+	float 	X, Y;
+	float	R, G, B;
+	vectorT	sensor_normal;
+
+	sensor_normal.x = 0;
+	sensor_normal.y = 0;
+	sensor_normal.z = -1;
+
+	X = 2.0*(0.5 - (x / (float) width));
+	Y = 2.0*(0.5 - (y / (float) height));
+
+	ray.origin.x = scene->camera.d * X;
+	ray.origin.y = scene->camera.d * Y;
+	ray.origin.z = scene->camera.z;
+
+	ray.refractive_index = 1.0;
+
+	R = G = B = 0.0;
+
+	for (i=0; i<samples; i++) {
+		vectorT p;
+
+		sample_circle(scene->camera.lens[0].radius, &p.x, &p.y);
+		p.z = scene->camera.lens[0].z;
+
+		diff_vector(&p, &ray.origin, &ray.direction);
+			
+		normalize_vector(&ray.direction);
+
+		memset (&ray.color[0], 0, sizeof(float) * 4);
+
+		hit = cast_ray_through_camera (&ray, &SCENE->camera, &camera_ray);
+		if (!hit) {
+			printf ("this should never happen\n");
+			continue;
+		}
+
+		ret = cast_ray (&camera_ray, SCENE, 4);
+
+		if (ret) {
+			float cosine = dot_vector(&sensor_normal, &ray.direction);
+			R += ret->color[0] * cosine;
+			G += ret->color[1] * cosine;
+			B += ret->color[2] * cosine;
+		}
+	}
+
+	pixels[((y*width) + x)*3 + 0] = R * 255 / (float) samples;
+	pixels[((y*width) + x)*3 + 1] = G * 255 / (float) samples;
+	pixels[((y*width) + x)*3 + 2] = B * 255 / (float) samples;
+	return (1);
+}
+
+
 
 void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 	int	x, y;
@@ -60,7 +141,8 @@ void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 	
 	for (y=0; y<height; y++) {
 		for (x=0; x<width; x++) {
-			single_ray_trace_to_pixels (scene, width, height, x, y, pixels);
+//			single_ray_trace_to_pixels (scene, width, height, x, y, pixels);
+			single_ray_trace_to_sensor (scene, width, height, x, y, SAMPLES, pixels);
 		}
 		printf ("%4.2f%%\n", y*100.0 / (float) height);
 	}
@@ -91,11 +173,11 @@ void	render_scene(void)
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     gluPerspective(fov,aspect,0.1f,100.0f);
-	glTranslatef(0,0,-2);
+	glTranslatef(0,0,-10);
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-	glRotatef(frame*0.01, 0,1,0);
+	glRotatef(frame*0.5, 0,1,0);
 
 	glViewport(0, 0, gui_state.w/2, gui_state.h);		
 
@@ -105,11 +187,10 @@ void	render_scene(void)
 
 #ifdef WIREFRAME
 	// Show the camera as axes markers
-	gl_axes_wireframe(SCENE->camera.x, SCENE->camera.y, SCENE->camera.z);
+	gl_axes_wireframe(0, 0, SCENE->camera.z);
 
 	display_ray_buffer();
 #endif	
-
 	for (i=0; i<SCENE->lights; i++) {
 		SCENE->light[i]->gl_draw(SCENE->light[i]);
 	}
@@ -154,7 +235,7 @@ void	render_scene(void)
 
 			x = random() % SCREEN_WIDTH;
 			y = random() % SCREEN_HEIGHT;
-			single_ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, x, y, SCREEN_PIXELS);
+			single_ray_trace_to_sensor(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, x, y, SAMPLES, SCREEN_PIXELS);
 		}
 	}
 
@@ -184,40 +265,35 @@ sceneT	*setup_scene (void) {
 	int		i;
 	float sea[4] = {0.15, 0.92, 0.66, 1};
 	float white[4] = {1, 1, 1, 1};
-	float sky[4] = {0.4, 0.8, 0.95, 1};
 	float pink[4] = {1, 0.2, 0.2, 1};
 	float orange[4] = {1,0.7,0.4,1};
 
 	s = create_scene ();
 
-	obj = create_sphere_object(0.0, 0, 0, 0.1);
-	color_object (obj, orange, 0.2,0.1, 0.0, 1);
+	obj = create_sphere_object(0.6, 0, -7, 0.3);
+	color_object (obj, sea, 0.1,0.1, 0.0, 1);
 	add_object_to_scene (s, obj);
 
-	obj = create_sphere_object(-0.25, 0, 0, 0.1);
-	color_object (obj, sea, 0.2,0.1, 0.0, 1);
+	obj = create_sphere_object(0, 0, -10, 0.6);
+	color_object (obj, orange, 0.3,0.1, 0.0, 1);
 	add_object_to_scene (s, obj);
 
-	obj = create_sphere_object(0.25, 0, 0, 0.1);
-	color_object (obj, pink, 0.2,0.1, 0.0, 1);
+	obj = create_sphere_object(-0.5, 0, -5, 0.3);
+	color_object (obj, pink, 0.6,0.0, 0.0, 1);
 	add_object_to_scene (s, obj);
 
-	obj = create_sphere_object(0.02, -0.05, 0.8, 0.05);
-	color_object (obj, white, 0.1,0.0, 0.9, 1.8);
-	add_object_to_scene (s, obj);
 
-/*
-	obj = create_checkerboard_object(-0.15, 2, 3);
-	add_object_to_scene (s, obj);
-*/
 
-	obj = create_ortho_plane_object(0, 0, 1, -15);
-	color_object (obj, sky, 0.0,0.0, 0, 1);
-	add_object_to_scene (s, obj);
-
-	obj = create_ortho_plane_object(0, 1, 0, -0.15);
+	obj = create_ortho_plane_object(0, 1, 0, -0.5);
 	set_object_property_function(obj, checker_property_function);
 	add_object_to_scene (s, obj);
+
+	add_lens_to_camera(&s->camera, 0, 1.6,1.7, 1.0, 4.3);
+	add_object_to_scene(s, s->camera.lens[0].object);
+/*
+	add_lens_to_camera(&s->camera, -1, 0.6, 0.7, 0.5, 1.5);
+	add_object_to_scene(s, s->camera.lens[1].object);
+*/
 
 	int	L = 1;
 	for (i=0; i<L; i++) {

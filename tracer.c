@@ -1,3 +1,5 @@
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -11,6 +13,7 @@
 primitiveT	*SPHERE;
 primitiveT	*TRIANGLE;
 primitiveT	*ORTHO_PLANE;
+primitiveT	*LENS;
 
 void array_to_vector(float *arr, vectorT *v) {
 	v->x = arr[0];
@@ -213,6 +216,18 @@ void sphere_gl_draw(float *parameter) {
 	gl_sphere(parameter[0], parameter[1], parameter[2], parameter[3], 20);
 }
 
+void lens_gl_draw (float *parameter) {
+	float	z, r1, r2, R;
+
+	z = parameter[0];
+	r1 = parameter[1];
+	r2 = parameter[2];
+	R = parameter[3];
+
+	gl_xy_sphere_cap (r1, R, z, 15);
+	gl_xy_sphere_cap (-r2, R, z, 15);
+}
+
 void triangle_gl_draw(float *parameter) {
 	float normal[9];
 	int	i;
@@ -322,6 +337,21 @@ objectT *create_sphere_object (float x, float y, float z, float r) {
 	return (obj);
 }
 
+objectT *create_lens_object (float z, float r1, float r2, float R) {
+	objectT 	*obj;
+	surfaceT	*surf;
+	
+	obj = create_object(1);	
+	surf = &obj->surface[0];
+	init_surface(LENS, surf);	
+	surf->parameter[0] = z;
+	surf->parameter[1] = r1;
+	surf->parameter[2] = r2;
+	surf->parameter[3] = R;
+
+	return (obj);
+}
+
 objectT *create_ortho_plane_object (float nx, float ny, float nz, float pos) {
 	objectT *obj;
 	surfaceT *surf;	
@@ -341,7 +371,7 @@ objectT *create_ortho_plane_object (float nx, float ny, float nz, float pos) {
 void	checker_property_function (surfaceT *self, rayT *camera_ray, vectorT *intersection, surface_propertiesT *result) {
 	// produces a checkerboard in the xz plane
 
-	float scale = 10.0f;
+	float scale = 2.0f;
 
 	result->color[0] = 1.0;
 	result->color[1] = 1.0;
@@ -367,6 +397,13 @@ void	checker_property_function (surfaceT *self, rayT *camera_ray, vectorT *inter
 
 char	null_ray_intersects (float *parameter, rayT *ray, vectorT *intersection) {
 	return (0);
+}
+
+void	sphere_normal(float *parameter, vectorT *point, vectorT *normal) {
+	vectorT center;
+	array_to_vector(parameter, &center);
+	diff_vector(point, &center, normal);
+	normalize_vector(normal);
 }
 
 char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection) {
@@ -432,6 +469,97 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 	exit (-1);	
 	return (0);
 }
+
+char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
+	float	sphere_parameter[4];
+	vectorT	normal;
+	vectorT	intersection;
+	char	hit;
+	float 	dist;
+
+	float	z, r1, r2, R;
+
+	z = lens->z;
+	r1 = lens->r1;
+	r2 = lens->r2;
+	R = lens->radius;
+
+	// Coming in to the front of the lens
+	if (ray->origin.z < z) return(0);
+	if (ray->direction.z > 0) return (0);	// Wong ray.
+
+	sphere_parameter[0] = 0; 	// center.x
+	sphere_parameter[1] = 0;	// center.y
+	sphere_parameter[2] = z - sqrt(powf(r1, 2.0f) - powf(R,2.0f));
+	sphere_parameter[3] = r1;
+
+	hit = ray_sphere_intersection (sphere_parameter, ray, &intersection);
+	if (!hit) return (0);
+
+	// Check tht the intersection is on the cap
+	dist = sqrt(powf(intersection.x, 2.0f) + powf(intersection.y, 2.0f));
+	if (dist > R) return (0);
+
+	// Refract
+	out->origin = intersection;
+	sphere_normal(sphere_parameter, &intersection, &normal);
+	refract_vector(&ray->direction, &normal, 1, lens->refractive_index, &out->direction);
+
+	
+	// Pass the light through the back of the lens	
+
+	sphere_parameter[0] = 0; 	// center.x
+	sphere_parameter[1] = 0;	// center.y
+	sphere_parameter[2] = z + sqrt(powf(r2, 2.0f) - powf(R,2.0f));
+	sphere_parameter[3] = r2;
+
+	hit = ray_sphere_intersection (sphere_parameter, out, &intersection);
+	if (!hit)  { 
+		printf ("ODD\n");
+		return (0);
+	}
+
+	out->origin = intersection;
+	sphere_normal(sphere_parameter, &intersection, &normal);
+	normal.x *= -1.0;
+	normal.y *= -1.0;
+	normal.z *= -1.0;
+	refract_vector(&ray->direction, &normal, lens->refractive_index, 1, &out->direction);
+
+	return (1);
+}
+
+char	ray_lens_intersection (float *parameter, rayT *ray, vectorT *intersection) {
+	return (0);
+}
+
+char	cast_ray_through_camera(rayT *ray, cameraT *camera, rayT *out) {
+	int		i;
+	char	hit;
+
+	for (i=0; i<camera->lenses; i++) {
+		hit = ray_through_lens (ray, &camera->lens[i], out);
+		add_seg_to_display_buffer(&ray->origin, &out->origin, 1, 0, 0);
+		// TODO: lens barrel
+		if (!hit) return (0);
+	}
+
+	return (1);
+}
+
+void add_lens_to_camera (cameraT *camera, float z, float r1, float r2, float R, float refractive_index) {
+	int	i;
+		
+	i = camera->lenses;
+	camera->lens[i].z = z;
+	camera->lens[i].r1 = r1;
+	camera->lens[i].r2 = r2;
+	camera->lens[i].radius = R;
+	camera->lens[i].refractive_index = refractive_index;
+	camera->lens[i].object = create_lens_object(z, r1, r2, R);
+	camera->lenses++;
+}
+
 
 char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersection) {
 	vectorT	p, d, v0, v1, v2;
@@ -539,13 +667,6 @@ void set_object_property_function (objectT *obj,
 
 
 
-void	sphere_normal(float *parameter, vectorT *point, vectorT *normal) {
-	vectorT center;
-	array_to_vector(parameter, &center);
-	diff_vector(point, &center, normal);
-	normalize_vector(normal);
-}
-
 void	triangle_normal(float *parameter, vectorT *point, vectorT *normal) {
 	array_to_vector(&parameter[9], normal);
 }
@@ -568,8 +689,10 @@ void init_primitives (void) {
 	ORTHO_PLANE = create_primitive("ortho_plane", ortho_plane_gl_draw, ray_ortho_plane_intersection, ortho_plane_normal,
 							4, "nx", "ny", "nz", "pos");
 
+	LENS = create_primitive("lens", lens_gl_draw, ray_lens_intersection, sphere_normal,
+							4, "z", "r1", "r2", "R");
 
-	// todo: plane, lens, aperture
+	// todo: lens, aperture, tube
 }
 
 sceneT *create_scene (void) {
@@ -584,9 +707,9 @@ sceneT *create_scene (void) {
 	s->lights = 0;
 	s->light = (lightT **) malloc (sizeof(lightT *) * s->light_array_size);
 
-	params_to_vector(0,0,1.1, &s->camera);
-
-	s->refractive_index = 1.0;
+	s->camera.d = 0.5;
+	s->camera.z = 1.1;
+	s->camera.lenses = 0;
 
 	return (s);
 }
@@ -752,7 +875,6 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	if (depth < 0) return (ray); 
 
-
 	for (i=0; i<scene->objects; i++) {
 		objectT *obj = scene->object[i];
 
@@ -760,6 +882,8 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 			vectorT 	intersection;
 			surfaceT 	*surf = &obj->surface[j];
 			primitiveT *p = surf->primitive;
+
+			if (p == LENS) continue;
 
 			if (p->ray_intersects(surf->parameter, ray, &intersection)) {
 				// We have a hit!
@@ -885,7 +1009,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 			} else {
 				scale_vector(&rough_normal, -1.0);
-				refraction_ray.refractive_index = scene->refractive_index;
+				refraction_ray.refractive_index =1.0;
 				refracts = refract_vector(&ray->direction, &rough_normal, 
 								ray->refractive_index, 
 								refraction_ray.refractive_index,

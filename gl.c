@@ -1,3 +1,5 @@
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
 #include <unistd.h> 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +15,8 @@
 #define ESCAPE 27
 
 #define PI 3.14159265
+
+#define MAX_SEGMENTS 16384
 
 sceneT	*SCENE;
 float	tick_length = 0.05;
@@ -91,16 +95,11 @@ unsigned char get_last_key (void) {
 }
 
 void gl_sphere (float x, float y, float z, float r, int segments) {
-	vectorT *p_circle;
-	vectorT *p_norm;
-	vectorT *circle;
-	vectorT *norm;
+	vectorT p_circle[MAX_SEGMENTS];
+	vectorT p_norm[MAX_SEGMENTS];
+	vectorT circle[MAX_SEGMENTS];
+	vectorT norm[MAX_SEGMENTS];
 	int		i, j;
-
-	p_circle = (vectorT *) malloc (sizeof(vectorT) * segments);
-	circle = (vectorT *) malloc (sizeof(vectorT) * segments);
-	p_norm = (vectorT *) malloc (sizeof(vectorT) * segments);
-	norm = (vectorT *) malloc (sizeof(vectorT) * segments);
 
 	for (i=0; i<segments; i++) {
 		p_circle[i].x = x;
@@ -110,8 +109,6 @@ void gl_sphere (float x, float y, float z, float r, int segments) {
 		p_norm[i].y = -1;
 		p_norm[i].z = 0;
 	}	
-
-
 
 	for (i=1; i<segments; i++) {
 		float h = r * ((2.0f * i / (float) (segments-1)) - 1.0f);
@@ -293,9 +290,7 @@ void gl_ortho_plane (float nx, float ny, float nz, float pos, float W, int N) {
 			params_to_array(x,y,z, v);
 			gl_show_ray_tick(v, n);
 		}
-	
 	}
-	
 }
 
 void gl_cube(float x, float y, float z, float d)
@@ -338,6 +333,79 @@ void gl_cube(float x, float y, float z, float d)
   glVertex3f(x+ d,y+-d,z+ d);       // Bottom Left Of The Quad (Right)
   glVertex3f(x+ d,y+-d,z+-d);       // Bottom Right Of The Quad (Right)
   glEnd();                  // Done Drawing The Cube
+}
+
+void gl_xy_sphere_cap (float r, float R, float z, int segments) {
+
+	// r = radius of curvature
+	// R = radius of cap
+	// z = position on z-axis
+
+	int		i, j;
+	float	max_theta;
+	float	theta, phi;
+	vectorT p_circle[MAX_SEGMENTS];
+	vectorT p_norm[MAX_SEGMENTS];		// TODO
+	vectorT circle[MAX_SEGMENTS];
+	vectorT norm[MAX_SEGMENTS];
+
+	max_theta = asinf (R / r);
+
+	for (i=0; i<segments; i++) {
+		phi = i * 2.0f * PI / (float) (segments-1);
+		p_circle[i].x = R * cos(phi);
+		p_circle[i].y = R * sin(phi);
+		p_circle[i].z = z;
+	}
+
+	for (i=1; i<segments; i++) {
+		// phi goes from 0 to 2pi
+		// theta goes from asin(R/r) to 0
+		float	RR; // radius of this segment
+
+		theta = max_theta * (1.0 - (i / (float) (segments-1)));
+		RR = r * sin(theta);
+
+		for (j=0; j<segments; j++) {
+			phi = j * 2.0f * PI / (float) (segments-1);
+
+			circle[j].x = RR * cos(phi);
+			circle[j].y = RR * sin(phi);
+			circle[j].z = z + r * cos(theta) - r * cos (max_theta);
+		}
+
+		for (j=0; j<segments; j++) {
+			int	n = (j+1) % segments;	
+
+			float	vertex[9];	
+			float	normal[9];
+
+			// pointing up
+			vector_to_array(&norm[j], &normal[0]);
+			vector_to_array(&circle[j], &vertex[0]);
+
+			vector_to_array(&norm[n], &normal[3]);
+			vector_to_array(&circle[n], &vertex[3]);
+
+			vector_to_array(&p_norm[j], &normal[6]);
+			vector_to_array(&p_circle[j], &vertex[6]);
+			gl_triangle (vertex, normal);
+
+			// pointing down
+			vector_to_array(&p_norm[j], &normal[0]);
+			vector_to_array(&p_circle[j], &vertex[0]);
+
+			vector_to_array(&p_norm[n], &normal[3]);
+			vector_to_array(&p_circle[n], &vertex[3]);
+
+			vector_to_array(&norm[n], &normal[6]);
+			vector_to_array(&circle[n], &vertex[6]);
+			gl_triangle (vertex, normal);
+		}
+
+		memcpy (p_circle, circle, sizeof(vectorT) * segments);
+		memcpy (p_norm, norm, sizeof(vectorT) * segments);
+	}
 }
 
 
