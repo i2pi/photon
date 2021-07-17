@@ -16,10 +16,10 @@
 #define ESCAPE 27
 
 #define SCREEN_TEXTURE_ID	1
-#define SCREEN_WIDTH		256
-#define SCREEN_HEIGHT		256
+#define SCREEN_WIDTH	  (1920/2)
+#define SCREEN_HEIGHT		(1080/2)
 
-#define SAMPLES	512
+#define SAMPLES	1000
 
 #define PI 3.1415926535
 
@@ -225,19 +225,12 @@ void	render_scene(void)
 		case 'p': pause_rays = pause_rays ? 0 : 1; break;
 	}
 
-	if (frame == 1) {
 		printf ("Starting render... ");
+    SCENE->camera.z = 0 + frame / 300.0f;
+    SCENE->camera.d = 0.5 + 0.4*sin(frame / 137.0);
 		ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
-		printf ("Render complete!\n");
-	} else {
+		save_screen(frame, SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-		if (!pause_rays) {
-
-			x = random() % SCREEN_WIDTH;
-			y = random() % SCREEN_HEIGHT;
-			single_ray_trace_to_sensor(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, x, y, SAMPLES, SCREEN_PIXELS);
-		}
-	}
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
 
@@ -264,13 +257,14 @@ sceneT	*setup_scene (void) {
 	objectT	*obj;
 	int		i;
 	float sea[4] = {0.15, 0.92, 0.66, 1};
+	float sky[4] = {0.15, 0.52, 0.86, 1};
 	float white[4] = {1, 1, 1, 1};
 	float pink[4] = {1, 0.2, 0.2, 1};
 	float orange[4] = {1,0.7,0.4,1};
 
 	s = create_scene ();
 
-	obj = create_sphere_object(0.6, 0, -7, 0.3);
+	obj = create_sphere_object(0.6, 0, -0.5, 0.3);
 	color_object (obj, sea, 0.1,0.1, 0.0, 1);
 	add_object_to_scene (s, obj);
 
@@ -278,22 +272,27 @@ sceneT	*setup_scene (void) {
 	color_object (obj, orange, 0.3,0.1, 0.0, 1);
 	add_object_to_scene (s, obj);
 
-	obj = create_sphere_object(-0.5, 0, -5, 0.3);
+
+	obj = create_sphere_object(-0.5, 0, -1, 0.3);
 	color_object (obj, pink, 0.6,0.0, 0.0, 1);
 	add_object_to_scene (s, obj);
 
-
+	obj = create_ortho_plane_object(0, 0, 1, -5);
+	color_object (obj, sky, 0.0,0.0, 0.0, 1);
+	add_object_to_scene (s, obj);
 
 	obj = create_ortho_plane_object(0, 1, 0, -0.5);
 	set_object_property_function(obj, checker_property_function);
 	add_object_to_scene (s, obj);
 
-	add_lens_to_camera(&s->camera, 0, 1.6,1.7, 1.0, 4.3);
+	add_lens_to_camera(&s->camera, 0, 1.1,0.7, 0.1, 1.8);
 	add_object_to_scene(s, s->camera.lens[0].object);
-/*
-	add_lens_to_camera(&s->camera, -1, 0.6, 0.7, 0.5, 1.5);
+
+
+/*	add_lens_to_camera(&s->camera, -1, 100, 3.7, 1.5, 1.1);
 	add_object_to_scene(s, s->camera.lens[1].object);
-*/
+  */
+
 
 	int	L = 1;
 	for (i=0; i<L; i++) {
