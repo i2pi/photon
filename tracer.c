@@ -707,7 +707,7 @@ sceneT *create_scene (void) {
 	s->lights = 0;
 	s->light = (lightT **) malloc (sizeof(lightT *) * s->light_array_size);
 
-	s->camera.d = 0.5;
+	s->camera.d = 0.75;
 	s->camera.z = 1.1;
 	s->camera.lenses = 0;
 
