@@ -17,13 +17,14 @@
 
 #define ESCAPE 27
 
-#define THREADS 4
-
 #define SCREEN_TEXTURE_ID	1
-#define SCREEN_WIDTH	  500
-#define SCREEN_HEIGHT	  500	
+#define SCREEN_WIDTH	  400
+#define SCREEN_HEIGHT	  400	
 
-#define SAMPLES	4
+#define THREADS       16
+#define MIN_SAMPLES   32
+#define MAX_SAMPLES   1000
+#define QUAL_THRESH   0.05
 
 #define PI 3.1415926535
 
@@ -37,6 +38,9 @@ float	clamp (float x) {
 }
 
 char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, int y, char *pixels) {
+  /*
+   * Unused. Casts a single ray without sampling
+   */
 	rayT	ray, camera_ray;
 	rayT 	*ret;
 
@@ -76,14 +80,23 @@ void	sample_circle (float R, float *x, float *y) {
 	*y = s * sin(t);
 }
 
-char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, int y, int samples, char *pixels) {
-	int		i;
+char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, int y, int min_samples, int max_samples, float thresh, char *pixels) {
+	int		i, j;
 	rayT	ray, camera_ray;
 	rayT 	*ret;
 	char	hit;
 	float 	X, Y;
+  float r, g, b;
 	float	R, G, B;
 	vectorT	sensor_normal;
+  char  done;
+
+  float l_buf[1024];
+
+  if (max_samples > 1024) {
+      fprintf (stderr, "max_samples (%d) > 1024", max_samples);
+      exit (-1);
+  }
 
 	sensor_normal.x = 0;
 	sensor_normal.y = 0;
@@ -100,7 +113,7 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
 
 	R = G = B = 0.0;
 
-	for (i=0; i<samples; i++) {
+	for (i=0; i<max_samples; i++) {
 		vectorT p;
 
 		sample_circle(scene->camera.lens[0].radius, &p.x, &p.y);
@@ -114,6 +127,7 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
 
 		hit = cast_ray_through_camera (&ray, &SCENE->camera, &camera_ray);
 		if (!hit) {
+      // TODO: This happens :)
 	//		printf ("this should never happen\n");
 			continue;
 		}
@@ -122,15 +136,52 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
 
 		if (ret) {
 			float cosine = dot_vector(&sensor_normal, &ray.direction);
-			R += ret->color[0] * cosine;
-			G += ret->color[1] * cosine;
-			B += ret->color[2] * cosine;
-		}
-	}
+			r = ret->color[0] * cosine;
+			g = ret->color[1] * cosine;
+			b = ret->color[2] * cosine;
 
-	pixels[((y*width) + x)*3 + 0] = R * 255 / (float) samples;
-	pixels[((y*width) + x)*3 + 1] = G * 255 / (float) samples;
-	pixels[((y*width) + x)*3 + 2] = B * 255 / (float) samples;
+      R += r;
+      G += g;
+      B += b;
+		} else {
+      r = g = b = 0.0;
+    }
+
+    /*
+     * Instead of taking MAX_SAMPLES for each ray, we keep a buffer
+     * of the running mean of the luminance (r+g+b). When the last
+     * MIN_SAMPLES of the running luminance doesn't vary by more 
+     * than QUAL_THRESH %, we cut short the sampling.
+     */
+
+    // TODO: Circular buffer
+    if (i == 0) {
+      l_buf[i] = r + g + b;
+    } else {
+      l_buf[i] = l_buf[i-1] + ( (r + g + b - l_buf[i-1]) / (float) (i + 1.0) );
+    }
+
+    if (i > min_samples) {
+      for (j=1; j<min_samples; j++) {
+        float score = fabs(l_buf[i-j] - l_buf[i]) / (l_buf[i]);
+        if (score > thresh) break;
+      }
+      if (j == min_samples) break;
+    } 
+  }
+
+
+
+/*
+  pixels[((y*width) + x)*3 + 0] = (i / max_samples) * 255;
+  pixels[((y*width) + x)*3 + 1] = (i / max_samples) * 255;
+  pixels[((y*width) + x)*3 + 2] = (i / max_samples) * 255;
+*/
+
+	pixels[((y*width) + x)*3 + 0] = R * 255 / (float) i;
+	pixels[((y*width) + x)*3 + 1] = G * 255 / (float) i;
+	pixels[((y*width) + x)*3 + 2] = B * 255 / (float) i;
+
 	return (1);
 }
 
@@ -145,12 +196,17 @@ typedef struct {
 } bundle_argsT;
 
 void *ray_trace_bundle_to_pixels (bundle_argsT *args) {
+  /*
+   * Ray traces a y-section of the screen. Intended to be run
+   * inside a thread. We divide by y to give some semblance of 
+   * cache coherency.
+   */
   int x, y;
 
    for (y=args->y_start; y<args->y_end; y++) {
     for (x=0; x<args->width; x++) {
       single_ray_trace_to_sensor (args->scene, args->width, args->height, 
-          x, y, SAMPLES, args->pixels);
+          x, y, MIN_SAMPLES, MAX_SAMPLES, QUAL_THRESH, args->pixels);
     }
   }
 
@@ -261,10 +317,21 @@ void	render_scene(void)
 		case 'p': pause_rays = pause_rays ? 0 : 1; break;
 	}
 
-  SCENE->camera.z = 0 + frame / 300.0f;
-  SCENE->camera.d = 0.5 + 0.4*sin(frame / 137.0);
+//  SCENE->camera.z = 0 + frame / 300.0f;
+//  SCENE->camera.d = 0.5 + 0.4*sin(frame / 137.0);
+
+  struct timeval start, end;
+	float elapsed;
+
+  gettimeofday(&start, NULL);
 	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
 	save_screen(frame, SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT);
+
+  gettimeofday(&end, NULL);
+	elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1e6f;
+
+  printf ("%6.4fs\n", elapsed);
+
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
 
@@ -283,6 +350,7 @@ void	render_scene(void)
 	glBindTexture(GL_TEXTURE_2D, 0); // Unbind any textures
 	
 	glutSwapBuffers();	
+
 }
 
 sceneT	*setup_scene (void) {

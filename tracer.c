@@ -515,7 +515,8 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 
 	hit = ray_sphere_intersection (sphere_parameter, out, &intersection);
 	if (!hit)  { 
-		printf ("ODD\n");
+    // TODO - this happens often!
+//		printf ("ODD\n");
 		return (0);
 	}
 
@@ -912,8 +913,6 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		properties = surface->properties;
 	}
 
-
-
 	// Get incident light at the point of intersection on the surface
 
 	for (i=0; i<4; i++) ray->color[i] = 0;
@@ -948,7 +947,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		if (diffuse < 0) diffuse = 0;
 		if (specular <0) specular= 0;
 
-		// todo: put shininess in properties
+		// TODO: put shininess in properties
 		phong = (1.0 - properties.transparency) * diffuse * 0.9f +
 				powf(specular, 35.0f) * properties.reflectance;
 	

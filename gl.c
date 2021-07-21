@@ -429,8 +429,8 @@ void draw_pixels_to_texture (char *pixels, int w, int h, int tex_id) {
 
 void init_gl(int argc, char **argv)
 {
-	int	Width = 512;
-	int Height = 256;
+	int	Width = 1024;
+	int Height = 512;
 
 	glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA | GLUT_DEPTH);
