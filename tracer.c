@@ -10,6 +10,8 @@
 #include "gl.h"
 #include "wireframe.h"
 
+#undef DEBUG
+
 primitiveT	*SPHERE;
 primitiveT	*TRIANGLE;
 primitiveT	*ORTHO_PLANE;
@@ -516,7 +518,7 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	hit = ray_sphere_intersection (sphere_parameter, out, &intersection);
 	if (!hit)  { 
     // TODO - this happens often!
-//		printf ("ODD\n");
+		printf ("ODD\n");
 		return (0);
 	}
 
@@ -526,6 +528,8 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	normal.y *= -1.0;
 	normal.z *= -1.0;
 	refract_vector(&ray->direction, &normal, lens->refractive_index, 1, &out->direction);
+
+  out->refractive_index = 1.0;
 
 	return (1);
 }
@@ -814,11 +818,16 @@ objectT *create_checkerboard_object (float y, float width, int n) {
     return (obj);
 }
 
-char	line_of_sight(sceneT *scene, vectorT *a, vectorT *b) {
+float line_of_sight(sceneT *scene, vectorT *a, vectorT *b) {
 	// Can a see b in this scene?
+  //
+  // Returns -1 if they can't see eachother
+  // Returns +1 if there is direct line of sight
+  // Returns 0..1 if there is line of sight through a transparent object
 
 	rayT	ray;
 	int	i, j;
+  float transparency = 0.0;
 
 	ray.origin = *a;
 	diff_vector(b, a, &ray.direction);
@@ -838,13 +847,15 @@ char	line_of_sight(sceneT *scene, vectorT *a, vectorT *b) {
 				// Make sure we're not self-intersecting...
 				if ((dist_vector(a, &intersection) > 0.001) &&
 				    (dist_vector(b, &intersection) > 0.001)) {
-					return (0);
+          if (surf->properties.transparency == 0) return (-1.0);
+
+          transparency += surf->properties.transparency == 0;
 				}
 			}
 		}
 	}
 
-	return (1);
+	return (1.0);
 }
 
 void perturb_vector (vectorT *a, float s, vectorT *p) {
@@ -855,13 +866,27 @@ void perturb_vector (vectorT *a, float s, vectorT *p) {
 	normalize_vector(p);
 }
 
+#ifdef DEBUG
+void print_pad(int d) {
+  for(;d>0;d--) {
+    printf ("  ");
+  }
+  printf("|");
+}
+#endif 
 
 rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
-	// Find the nearest intersection
+  /* 
+   * This is kinda the important function.
+   *
+   * Given a ray, find any objects in the scene that are
+   * hit by that ray. And then color the light from those
+   * intersections, reflections, refractions, transparencies, etc.
+   *
+   * This is a recursive function and it is passed an
+   * initial 'depth' and will not recurse beyond that.
+   */
 
-	// do this stupidly for now, just iterate through 
-	// every primative and test for intersections
-	// and then find the closest
 
 	int	i, j;
 
@@ -874,11 +899,23 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	surface_propertiesT properties;
 
-	if (depth < 0) return (ray); 
+
+#ifdef DEBUG
+  print_pad(10 - depth);
+  printf ("cast_ray(): \n");
+#endif 
+
+	if (depth < 0) {
+    return (ray); 
+  }
+
+  // Find the nearest intersection
 
 	for (i=0; i<scene->objects; i++) {
+    // Iterate through every object in the scene
 		objectT *obj = scene->object[i];
 
+    // Iterate through each of the surfaces of that object
 		for (j=0; j<obj->surfaces; j++) {
 			vectorT 	intersection;
 			surfaceT 	*surf = &obj->surface[j];
@@ -892,6 +929,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 				distance = dist_vector(&intersection, &ray->origin);
 
+        // distance > 0.0001 to stop ray intersecting with its origin surface
 				if ((distance < nearest_distance) && (distance > 0.00001))  {
 					found_hit = 1;
 					nearest_distance = distance;
@@ -926,11 +964,13 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		float	distance;
 		float	diffuse, specular;
 		float	phong;
+    float light_transparency;
 
 		light = scene->light[i];
 
-// TODO: Line of sight needs to take in to account transparent objects -- tricky :P
-		if (!line_of_sight(scene, &nearest_intersection, &light->position)) continue;
+		light_transparency = line_of_sight(scene, &nearest_intersection, &light->position);
+
+    if (light_transparency < 0) continue;
 
 		add_seg_to_display_buffer (&light->position, &nearest_intersection, 0.5,0.5,0);
 
@@ -952,7 +992,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 				powf(specular, 35.0f) * properties.reflectance;
 	
 		for (j=0; j<4; j++) {
-			ray->color[j] += phong * properties.color[j] * light->color[j] / (1 + distance * 0.01);
+			ray->color[j] += light_transparency * phong * properties.color[j] * light->color[j] / (1.0 + distance * 0.0001);
 		}
 	}
 
@@ -965,7 +1005,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 		for (i=0; i<4; i++) reflection_ray.color[i] = 0;
 	
-		// todo: better mechanism for sampling rather than hard coding stuff	
+		// TODO: better mechanism for sampling rather than hard coding stuff	
 		if (properties.roughness > 0) N = 1;
 		for (j=0; j<N; j++) {
 			reflection_ray.origin = nearest_intersection;
@@ -1000,12 +1040,12 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 			diff_vector(&nearest_intersection, &ray->origin, &op);
 			if (dot_vector(&op, &rough_normal) < 0) {
 				// outside
+        
 				refraction_ray.refractive_index = properties.refractive_index;
 				refracts = refract_vector(&ray->direction, &rough_normal, 
 								ray->refractive_index, 
 								refraction_ray.refractive_index,
 								&refraction_ray.direction);
-
 			} else {
 				scale_vector(&rough_normal, -1.0);
 				refraction_ray.refractive_index =1.0;

@@ -1,5 +1,6 @@
 photon
 ======
+a limited functionality, slow, and buggy rendering engine.
 ![img](https://raw.github.com/jdigittl/photon/master/images/photon001.png)
 ![img](https://raw.github.com/jdigittl/photon/master/images/photon002.png)
 ![img](https://raw.github.com/jdigittl/photon/master/images/photon003.png)

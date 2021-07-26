@@ -18,13 +18,16 @@
 #define ESCAPE 27
 
 #define SCREEN_TEXTURE_ID	1
-#define SCREEN_WIDTH	  400
-#define SCREEN_HEIGHT	  400	
 
-#define THREADS       16
+
+#define SCREEN_WIDTH	  500
+#define SCREEN_HEIGHT	  500	
+
+#define THREADS       24
 #define MIN_SAMPLES   32
-#define MAX_SAMPLES   1000
-#define QUAL_THRESH   0.05
+#define MAX_SAMPLES   4000
+#define QUAL_THRESH   0.001
+#define TRACE_DEPTH   64
 
 #define PI 3.1415926535
 
@@ -60,7 +63,7 @@ char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, in
 
 	if (!cast_ray_through_camera (&ray, &SCENE->camera, &camera_ray)) return (0);
 	
-	ret = cast_ray (&camera_ray, SCENE, 4);
+	ret = cast_ray (&camera_ray, SCENE, TRACE_DEPTH);
 	if (ret) {
 		pixels[((y*width) + x)*3 + 0] = clamp(ret->color[0]) * 255;
 		pixels[((y*width) + x)*3 + 1] = clamp(ret->color[1]) * 255;
@@ -91,9 +94,9 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
 	vectorT	sensor_normal;
   char  done;
 
-  float l_buf[1024];
+  float l_buf[8192];
 
-  if (max_samples > 1024) {
+  if (max_samples > 8192) {
       fprintf (stderr, "max_samples (%d) > 1024", max_samples);
       exit (-1);
   }
@@ -116,26 +119,25 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
 	for (i=0; i<max_samples; i++) {
 		vectorT p;
 
-		sample_circle(scene->camera.lens[0].radius, &p.x, &p.y);
-		p.z = scene->camera.lens[0].z;
+    sample_circle(0.05, &p.x, &p.y);
+    p.z = scene->camera.lens[0].z;
 
-		diff_vector(&p, &ray.origin, &ray.direction);
-			
-		normalize_vector(&ray.direction);
+  	diff_vector(&p, &ray.origin, &ray.direction);
+  	normalize_vector(&ray.direction);
 
-		memset (&ray.color[0], 0, sizeof(float) * 4);
+  	memset (&ray.color[0], 0, sizeof(float) * 4);
 
-		hit = cast_ray_through_camera (&ray, &SCENE->camera, &camera_ray);
-		if (!hit) {
-      // TODO: This happens :)
-	//		printf ("this should never happen\n");
-			continue;
-		}
+  	hit = cast_ray_through_camera (&ray, &SCENE->camera, &camera_ray);
+  	if (!hit) {
+     // TODO: This happens :)
+  	  printf ("this should never happen\n");
+     continue;
+  	}
 
-		ret = cast_ray (&camera_ray, SCENE, 4);
+  	ret = cast_ray (&camera_ray, SCENE, TRACE_DEPTH);
 
-		if (ret) {
-			float cosine = dot_vector(&sensor_normal, &ray.direction);
+  	if (ret) {
+			float cosine = dot_vector(&sensor_normal, &camera_ray.direction);
 			r = ret->color[0] * cosine;
 			g = ret->color[1] * cosine;
 			b = ret->color[2] * cosine;
@@ -143,7 +145,7 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
       R += r;
       G += g;
       B += b;
-		} else {
+  	} else {
       r = g = b = 0.0;
     }
 
@@ -169,18 +171,14 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
       if (j == min_samples) break;
     } 
   }
-
-
-
 /*
-  pixels[((y*width) + x)*3 + 0] = (i / max_samples) * 255;
-  pixels[((y*width) + x)*3 + 1] = (i / max_samples) * 255;
-  pixels[((y*width) + x)*3 + 2] = (i / max_samples) * 255;
+  pixels[((y*width) + x)*3 + 0] = 255 * (i / 500.0);
+  pixels[((y*width) + x)*3 + 1] = 255 * (i / 500.0); 
+  pixels[((y*width) + x)*3 + 2] = 255 * (i / 500.0);
 */
-
-	pixels[((y*width) + x)*3 + 0] = R * 255 / (float) i;
-	pixels[((y*width) + x)*3 + 1] = G * 255 / (float) i;
-	pixels[((y*width) + x)*3 + 2] = B * 255 / (float) i;
+	pixels[((y*width) + x)*3 + 0] = clamp(R / (float) i) * 255;
+	pixels[((y*width) + x)*3 + 1] = clamp(G / (float) i) * 255;
+	pixels[((y*width) + x)*3 + 2] = clamp(B / (float) i) * 255;
 
 	return (1);
 }
@@ -203,7 +201,7 @@ void *ray_trace_bundle_to_pixels (bundle_argsT *args) {
    */
   int x, y;
 
-   for (y=args->y_start; y<args->y_end; y++) {
+  for (y=args->y_start; y<args->y_end; y++) {
     for (x=0; x<args->width; x++) {
       single_ray_trace_to_sensor (args->scene, args->width, args->height, 
           x, y, MIN_SAMPLES, MAX_SAMPLES, QUAL_THRESH, args->pixels);
@@ -246,6 +244,61 @@ void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
 
 }
 
+sceneT	*setup_scene (int idx) {
+  sceneT	*s;
+  lightT	*l;
+  objectT	*obj;
+  int		i;
+  float sea[4] = {0.15, 0.92, 0.66, 1};
+  float sky[4] = {0.5, 0.70, 0.70, 1};
+  float white[4] = {1, 1, 1, 1};
+  float pink[4] = {0.89, 0.64, 0.68, 1};
+  float orange[4] = {1,0.7,0.4,1};
+
+  s = create_scene ();
+
+  obj = create_sphere_object(0, 0.0, -2.75, 0.9);
+  color_object (obj, pink, 0.0,0.0, 0.0, 1);
+  add_object_to_scene (s, obj);
+
+  for (i=0; i<5; i++) {
+    obj = create_sphere_object(0.4*sin(PI * (idx/32.0) + i*0.1), 0.0, -2.75, 0.91+i*(0.17 + 0.17*sin(i + PI * idx/128.0)));
+    color_object (obj, sky, 0.0,0.0, 0.9, 1.1 + i*0.08*sin(PI * idx / 48.0));
+
+    add_object_to_scene (s, obj);
+  }
+
+  obj = create_ortho_plane_object(0, 0, 1, -10000);
+  color_object (obj, white, 0.1,0.2, 0.0, 1);
+  add_object_to_scene (s, obj);
+
+  add_lens_to_camera(&s->camera, 0, 1.1,1.7 + 0.7*sin((32+idx) / 64.0), 0.6, 1.2 + 0.2 * sin(PI * (idx +17) / 192.0));
+  add_object_to_scene(s, s->camera.lens[0].object);
+
+
+  float color[4];
+  color[0] = 1.0;// / (i + 1.4);
+  color[1] = color[0];
+  color[2] = color[0];
+  color[3] = color[0];
+  l = create_positional_light(-5,7,1, color);
+  add_light_to_scene (s, l);
+
+  l = create_positional_light(7,-5,1, color);
+  add_light_to_scene (s, l);
+
+  color[0] = 0.7;// / (i + 1.4);
+  color[1] = color[0];
+  color[2] = color[0];
+  color[3] = color[0];
+  l = create_positional_light(-7,-5,1, color);
+  add_light_to_scene (s, l);
+
+  return (s);
+}
+
+
+
 void	render_scene(void)
 {
 	int		i, j;
@@ -253,6 +306,9 @@ void	render_scene(void)
 	static char pause_rays = 0;
 	//static int x = 0, y = 0;
 	unsigned char key;
+
+  SCENE = setup_scene(frame); // fuck it, lets just leak mem for now
+
 
 	key = get_last_key();
 	frame ++;
@@ -269,7 +325,7 @@ void	render_scene(void)
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-	glRotatef(frame*0.5, 0,1,0);
+    if (!pause_rays) glRotatef(frame*0.5, 0,1,0);
 
 	glViewport(0, 0, gui_state.w/2, gui_state.h);		
 
@@ -318,7 +374,7 @@ void	render_scene(void)
 	}
 
 //  SCENE->camera.z = 0 + frame / 300.0f;
-//  SCENE->camera.d = 0.5 + 0.4*sin(frame / 137.0);
+//  SCENE->camera.d = 0.5 + sin(frame / 17.0);
 
   struct timeval start, end;
 	float elapsed;
@@ -330,7 +386,7 @@ void	render_scene(void)
   gettimeofday(&end, NULL);
 	elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1e6f;
 
-  printf ("%6.4fs\n", elapsed);
+  printf ("[%04d : %4.2f] %6.4fs  %6.4ffps\n", frame, frame/24.0, elapsed, 1.0 / elapsed);
 
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
@@ -353,63 +409,6 @@ void	render_scene(void)
 
 }
 
-sceneT	*setup_scene (void) {
-	sceneT	*s;
-	lightT	*l;
-	objectT	*obj;
-	int		i;
-	float sea[4] = {0.15, 0.92, 0.66, 1};
-	float sky[4] = {0.15, 0.52, 0.86, 1};
-	float white[4] = {1, 1, 1, 1};
-	float pink[4] = {1, 0.2, 0.2, 1};
-	float orange[4] = {1,0.7,0.4,1};
-
-	s = create_scene ();
-
-	obj = create_sphere_object(0.6, 0, -0.5, 0.3);
-	color_object (obj, sea, 0.1,0.1, 0.0, 1);
-	add_object_to_scene (s, obj);
-
-	obj = create_sphere_object(0, 0, -10, 0.6);
-	color_object (obj, orange, 0.3,0.1, 0.0, 1);
-	add_object_to_scene (s, obj);
-
-
-	obj = create_sphere_object(-0.5, 0, -1, 0.3);
-	color_object (obj, pink, 0.6,0.0, 0.0, 1);
-	add_object_to_scene (s, obj);
-
-	obj = create_ortho_plane_object(0, 0, 1, -5);
-	color_object (obj, sky, 0.0,0.0, 0.0, 1);
-	add_object_to_scene (s, obj);
-
-	obj = create_ortho_plane_object(0, 1, 0, -0.5);
-	set_object_property_function(obj, checker_property_function);
-	add_object_to_scene (s, obj);
-
-	add_lens_to_camera(&s->camera, 0, 1.1,0.7, 0.1, 1.8);
-	add_object_to_scene(s, s->camera.lens[0].object);
-
-
-/*	add_lens_to_camera(&s->camera, -1, 100, 3.7, 1.5, 1.1);
-	add_object_to_scene(s, s->camera.lens[1].object);
-  */
-
-
-	int	L = 1;
-	for (i=0; i<L; i++) {
-		float color[4];
-		color[0] = 1.0 / (float) L;
-		color[1] = color[0];
-		color[2] = color[0];
-		color[3] = color[0];
-		l = create_positional_light(3,7,5+i*0.14, color);
-		add_light_to_scene (s, l);
-	}
-
-	return (s);
-}
-
 void init_screen(void) {
 	init_texture_for_pixels(SCREEN_TEXTURE_ID);	
 	SCREEN_PIXELS = (char *) calloc (sizeof(char), SCREEN_WIDTH * SCREEN_HEIGHT * 3);
@@ -419,7 +418,6 @@ int main(int argc, char **argv)
 {  
 	init_primitives();
 
-	SCENE = setup_scene();
 
 	init_gl (argc, argv);
 
