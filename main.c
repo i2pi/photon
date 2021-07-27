@@ -20,14 +20,14 @@
 #define SCREEN_TEXTURE_ID	1
 
 
-#define SCREEN_WIDTH	  500
-#define SCREEN_HEIGHT	  500	
+#define SCREEN_WIDTH	  200
+#define SCREEN_HEIGHT	  200	
 
-#define THREADS       24
+#define THREADS       4
 #define MIN_SAMPLES   32
 #define MAX_SAMPLES   4000
 #define QUAL_THRESH   0.001
-#define TRACE_DEPTH   64
+#define TRACE_DEPTH   32
 
 #define PI 3.1415926535
 
@@ -83,6 +83,10 @@ void	sample_circle (float R, float *x, float *y) {
 	*y = s * sin(t);
 }
 
+void print_vector(vectorT *v) {
+  printf ("(%4.3f, %4.3f, %4.3f)", v->x, v->y, v->z);
+}
+
 char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, int y, int min_samples, int max_samples, float thresh, char *pixels) {
 	int		i, j;
 	rayT	ray, camera_ray;
@@ -119,11 +123,19 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
 	for (i=0; i<max_samples; i++) {
 		vectorT p;
 
+//    printf ("Origin: "); print_vector(&ray.origin);
+
     sample_circle(0.05, &p.x, &p.y);
     p.z = scene->camera.lens[0].z;
 
+ //   printf ("Sample Circle: "); print_vector(&p);
+
   	diff_vector(&p, &ray.origin, &ray.direction);
+
+  //  printf ("Ray Direction: "); print_vector(&ray.direction);
   	normalize_vector(&ray.direction);
+   // printf ("Normalized: "); print_vector(&ray.direction);
+   // printf ("\n");
 
   	memset (&ray.color[0], 0, sizeof(float) * 4);
 
@@ -186,6 +198,9 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
 volatile int running_threads = 0;
 pthread_mutex_t running_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+volatile int pixels_done = 0;
+pthread_mutex_t pixels_done_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 typedef struct {
   sceneT  *scene;
   int     width, height;
@@ -200,13 +215,27 @@ void *ray_trace_bundle_to_pixels (bundle_argsT *args) {
    * cache coherency.
    */
   int x, y;
+  int pixels = 0;
 
   for (y=args->y_start; y<args->y_end; y++) {
     for (x=0; x<args->width; x++) {
       single_ray_trace_to_sensor (args->scene, args->width, args->height, 
           x, y, MIN_SAMPLES, MAX_SAMPLES, QUAL_THRESH, args->pixels);
+
+      pixels++;
+
+      if (pixels > 100) {
+        pthread_mutex_lock(&pixels_done_mutex);
+        pixels_done += pixels;
+        pthread_mutex_unlock(&pixels_done_mutex);
+        pixels = 0;
+      }
     }
   }
+
+  pthread_mutex_lock(&pixels_done_mutex);
+  pixels_done += pixels;
+  pthread_mutex_unlock(&pixels_done_mutex);
 
   pthread_mutex_lock(&running_mutex);
   running_threads--;
@@ -226,6 +255,8 @@ void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
   running_threads = THREADS;
   y = 0;
 
+  pixels_done = 0;
+
   for (t=0; t<THREADS; t++) {
       arg[t].scene = scene;
       arg[t].width = width;
@@ -240,11 +271,13 @@ void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
   }
 
   while (running_threads > 0) {
+    sleep(1);
+    printf ("%4.2f%% complete\n", 100.0f * pixels_done / (float) (width * height));
   }
 
 }
 
-sceneT	*setup_scene (int idx) {
+sceneT	*setup_scene (float idx) {
   sceneT	*s;
   lightT	*l;
   objectT	*obj;
@@ -307,8 +340,9 @@ void	render_scene(void)
 	//static int x = 0, y = 0;
 	unsigned char key;
 
-  SCENE = setup_scene(frame); // fuck it, lets just leak mem for now
 
+
+  SCENE = setup_scene(620 + frame / 100.0);
 
 	key = get_last_key();
 	frame ++;
