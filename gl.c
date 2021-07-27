@@ -1,3 +1,5 @@
+#ifndef NO_GL
+
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
 #include <unistd.h> 
@@ -486,3 +488,5 @@ void save_screen (int frame, char *rgb, int width, int height)
 
     fclose (fp);
 }
+
+#endif // NO_GL

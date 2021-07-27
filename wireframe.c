@@ -1,3 +1,4 @@
+#ifndef NO_GL
 #include "gl.h"
 #include "tracer.h"
 #include "wireframe.h"
@@ -76,3 +77,4 @@ void display_ray_buffer(void) {
 	}
 }
 
+#endif //NO_GL

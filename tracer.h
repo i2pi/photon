@@ -1,7 +1,9 @@
 #ifndef __TRACER_H__
 #define __TRACER_H__
 
+#ifndef NO_GL
 #include "gl.h" // For GLenum
+#endif
 
 #define MAX_LENSES 1024
 
@@ -53,7 +55,9 @@ typedef struct lightT {
 	vectorT	position;
 	float	color[4];
 
+#ifndef NO_GL
 	GLenum	GL_LIGHT;
+#endif
 	void	(*gl_draw)(struct lightT *self);
 } lightT;
 

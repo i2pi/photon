@@ -11,6 +11,9 @@ SRC=main.c gl.c tracer.c wireframe.c
 PROG=photon
 FPACK=file_pack/fpack
 
+headless: $(SRC)
+	$(CC) $(SRC) -lm -lpthread -DNO_GL $(CFLAGS) -o $(PROG) 
+
 mac: $(SRC)
 	$(CC) $(SRC) $(CFLAGS) -o $(PROG) -DMAC $(COMMON_LIBRARIES) $(MAC_LIBRARIES)
 

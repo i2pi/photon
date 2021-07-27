@@ -7,8 +7,10 @@
 #include <math.h>
 
 #include "tracer.h"
+#ifndef NO_GL
 #include "gl.h"
 #include "wireframe.h"
+#endif
 
 #undef DEBUG
 
@@ -211,14 +213,19 @@ primitiveT	*create_primitive(char *name,
 }
 
 void cube_gl_draw(float *parameter) {	
+#ifndef NO_GL
 	gl_cube(parameter[0], parameter[1], parameter[2], parameter[3]);
+#endif
 }
 
 void sphere_gl_draw(float *parameter) {
+#ifndef NO_GL
 	gl_sphere(parameter[0], parameter[1], parameter[2], parameter[3], 20);
+#endif
 }
 
 void lens_gl_draw (float *parameter) {
+#ifndef NO_GL
 	float	z, r1, r2, R;
 
 	z = parameter[0];
@@ -228,9 +235,11 @@ void lens_gl_draw (float *parameter) {
 
 	gl_xy_sphere_cap (r1, R, z, 15);
 	gl_xy_sphere_cap (-r2, R, z, 15);
+#endif
 }
 
 void triangle_gl_draw(float *parameter) {
+#ifndef NO_GL
 	float normal[9];
 	int	i;
 	for (i=0; i<3; i++) {
@@ -239,10 +248,13 @@ void triangle_gl_draw(float *parameter) {
 		normal[3*i + 2] = parameter[11];
 	}
 	gl_triangle(parameter, normal);
+#endif
 }
 
 void ortho_plane_gl_draw(float *parameter) {
+#ifndef NO_GL
 	gl_ortho_plane (parameter[0], parameter[1], parameter[2], parameter[3], 5, 40);
+#endif
 }
 
 
@@ -544,7 +556,9 @@ char	cast_ray_through_camera(rayT *ray, cameraT *camera, rayT *out) {
 
 	for (i=0; i<camera->lenses; i++) {
 		hit = ray_through_lens (ray, &camera->lens[i], out);
+#ifndef NO_GL
 		add_seg_to_display_buffer(&ray->origin, &out->origin, 1, 0, 0);
+#endif
 		// TODO: lens barrel
 		if (!hit) return (0);
 	}
@@ -729,6 +743,7 @@ void	add_object_to_scene (sceneT *s, objectT *o) {
 }
 
 void	add_light_to_scene (sceneT *s, lightT *l) {
+#ifndef NO_GL
 	GLenum gl_lights[] = {GL_LIGHT0, GL_LIGHT1, GL_LIGHT2, GL_LIGHT3, GL_LIGHT4};
 
 	if (s->lights >= s->light_array_size-1)  {
@@ -736,18 +751,20 @@ void	add_light_to_scene (sceneT *s, lightT *l) {
 		exit (-1);
 	}
 	if (s->lights < 8) l->GL_LIGHT = gl_lights[s->lights];
+#endif
 
 	s->light[s->lights++] = l;
 }
 
 void positional_light_gl_draw (lightT *self) {
+#ifndef NO_GL
 	gl_positional_light(self->GL_LIGHT, 
 		self->position.x, self->position.y, self->position.z, self->color);
+#endif
 }
 
 lightT	*create_positional_light (float x, float y, float z, float color[4]) {
 	lightT *l;
-	
 
 	l = (lightT *) malloc (sizeof(lightT));
 
@@ -942,7 +959,9 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 	if (!found_hit) return(NULL);
 
+#ifndef NO_GL
 	add_seg_to_display_buffer (&ray->origin, &nearest_intersection, 1,1,1);
+#endif
 
 	if (surface->property_function) {
 		// todo: should probably get different properties for phong vs. diffuse
@@ -972,7 +991,9 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
     if (light_transparency < 0) continue;
 
+#ifndef NO_GL
 		add_seg_to_display_buffer (&light->position, &nearest_intersection, 0.5,0.5,0);
+#endif
 
 		diff_vector(&light->position, &nearest_intersection, &incidence);
 

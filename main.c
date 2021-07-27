@@ -11,9 +11,11 @@
 #include <string.h>
 #include <pthread.h>
 
+#ifndef NO_GL
 #include "gl.h"
-#include "tracer.h"
 #include "wireframe.h"
+#endif
+#include "tracer.h"
 
 #define ESCAPE 27
 
@@ -34,6 +36,30 @@
 sceneT	*SCENE;
 
 char	*SCREEN_PIXELS;
+
+void save_screen (int frame, char *rgb, int width, int height)
+{
+    static unsigned char *screen = NULL;
+    FILE    *fp;
+    char    str[256];
+
+    if (!screen) {
+        screen = (unsigned char *) malloc (sizeof (unsigned char) * width * height * 4);
+    }
+    if (!screen) {
+        fprintf (stderr, "Failed to malloc screen\n");
+        exit (-1);
+    }
+
+    snprintf (str, 250, "frame%08d.ppm", frame);
+    fp = fopen (str, "w");
+    fprintf (fp, "P6\n");
+    fprintf (fp, "%d %d 255\n", width, height);
+
+        fwrite (rgb, 1, width*height*3, fp);
+
+    fclose (fp);
+}
 
 float	clamp (float x) {
 	if (x < 1) return (x);
@@ -338,14 +364,19 @@ void	render_scene(void)
 	static unsigned long frame = 0;
 	static char pause_rays = 0;
 	//static int x = 0, y = 0;
+	//
+#ifndef NO_GL
 	unsigned char key;
+	key = get_last_key();
+#endif
 
 
 
   SCENE = setup_scene(620 + frame / 100.0);
 
-	key = get_last_key();
 	frame ++;
+
+#ifndef NO_GL
 
 	// Render GL version
 //	set_camera();
@@ -407,6 +438,8 @@ void	render_scene(void)
 		case 'p': pause_rays = pause_rays ? 0 : 1; break;
 	}
 
+#endif //NO_GL
+
 //  SCENE->camera.z = 0 + frame / 300.0f;
 //  SCENE->camera.d = 0.5 + sin(frame / 17.0);
 
@@ -422,7 +455,7 @@ void	render_scene(void)
 
   printf ("[%04d : %4.2f] %6.4fs  %6.4ffps\n", frame, frame/24.0, elapsed, 1.0 / elapsed);
 
-
+#ifndef NO_GL
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
 
 	glBindTexture(GL_TEXTURE_2D, SCREEN_TEXTURE_ID);
@@ -440,24 +473,27 @@ void	render_scene(void)
 	glBindTexture(GL_TEXTURE_2D, 0); // Unbind any textures
 	
 	glutSwapBuffers();	
-
+#endif // NO_GL
 }
 
 void init_screen(void) {
+#ifndef NO_GL
 	init_texture_for_pixels(SCREEN_TEXTURE_ID);	
+#endif
 	SCREEN_PIXELS = (char *) calloc (sizeof(char), SCREEN_WIDTH * SCREEN_HEIGHT * 3);
 }
 
 int main(int argc, char **argv)
 {  
 	init_primitives();
-
-
-	init_gl (argc, argv);
-
 	init_screen ();
-  
+
+#ifndef NO_GL
+	init_gl (argc, argv);
 	glutMainLoop();  
+#else
+	render_scene();
+#endif //NO_GL
 
 	return (1);
 }
