@@ -7,7 +7,7 @@
 
 char PRINT_DEBUG = 0;
 
-#define MAX_RAY_DISPLAY_BUFFER 256 
+#define MAX_RAY_DISPLAY_BUFFER 4096
 rayT ray_display_buffer[MAX_RAY_DISPLAY_BUFFER];
 int	 ray_display_idx = 0;
 char ray_display_buffer_full = 0;

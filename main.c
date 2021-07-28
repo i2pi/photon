@@ -14,19 +14,16 @@
 #endif
 #include "tracer.h"
 
-#define ESCAPE 27
-
 #define SCREEN_TEXTURE_ID	1
 
+#define SCREEN_WIDTH	  500
+#define SCREEN_HEIGHT	  500	
 
-#define SCREEN_WIDTH	  200
-#define SCREEN_HEIGHT	  200	
-
-#define THREADS       4
+#define THREADS       16 
 #define MIN_SAMPLES   32
-#define MAX_SAMPLES   4000
+#define MAX_SAMPLES   5000
 #define QUAL_THRESH   0.001
-#define TRACE_DEPTH   32
+#define TRACE_DEPTH   4
 
 #define PI 3.1415926535
 
@@ -63,51 +60,20 @@ float	clamp (float x) {
 	return (1);
 }
 
-char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, int y, char *pixels) {
-  /*
-   * Unused. Casts a single ray without sampling
-   */
-	rayT	ray, camera_ray;
-	rayT 	*ret;
-
-	ray.origin.x = 0.0f;
-	ray.origin.y = 0.0f;
-	ray.origin.z = scene->camera.z;
-
-	ray.direction.x = 2.0*(x / (float) width) - 1.0;
-	ray.direction.y = 2.0*(y / (float) height) - 1.0;
-	ray.direction.z = -2.445; // TODO: calc from fov
-
-	normalize_vector(&ray.direction);
-
-	ray.refractive_index = 1.0;
-
-	memset (&ray.color[0], 0, sizeof(float) * 4);
-
-	if (!cast_ray_through_camera (&ray, &SCENE->camera, &camera_ray)) return (0);
-	
-	ret = cast_ray (&camera_ray, SCENE, TRACE_DEPTH);
-	if (ret) {
-		pixels[((y*width) + x)*3 + 0] = clamp(ret->color[0]) * 255;
-		pixels[((y*width) + x)*3 + 1] = clamp(ret->color[1]) * 255;
-		pixels[((y*width) + x)*3 + 2] = clamp(ret->color[2]) * 255;
-		return (1);
-	}
-	return (0);	
-}
-
-void	sample_circle (float R, float *x, float *y) {
-	float	t, s;
-
-	t = 2.0 * PI * (random() / (float) RAND_MAX);
-	s = R * (random() / (float) RAND_MAX);
-
-	*x = s * cos(t);
-	*y = s * sin(t);
-}
-
 void print_vector(vectorT *v) {
   printf ("(%4.3f, %4.3f, %4.3f)", v->x, v->y, v->z);
+}
+
+void  sample_hemisphere (vectorT *v) {
+  /*
+   * Produces a random unit vector that lies
+   * on the hemisphere z>0.
+   */
+
+  v->x = 0.5 - (random() / (float) RAND_MAX); // -1.0 .. +1.0
+  v->y = 0.5 - (random() / (float) RAND_MAX); // -1.0 .. +1.0
+  v->z = -random() / (float) RAND_MAX;         //  0.0 .. +1.0
+  normalize_vector(v);
 }
 
 char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, int y, int min_samples, int max_samples, float thresh, char *pixels) {
@@ -120,10 +86,10 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
 	float	R, G, B;
 	vectorT	sensor_normal;
 
-  float l_buf[8192];
+  float l_buf[65536];
 
-  if (max_samples > 8192) {
-      fprintf (stderr, "max_samples (%d) > 1024", max_samples);
+  if (max_samples > 65536) {
+      fprintf (stderr, "max_samples (%d) exceeded", max_samples);
       exit (-1);
   }
 
@@ -143,28 +109,38 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
 	R = G = B = 0.0;
 
 	for (i=0; i<max_samples; i++) {
-		vectorT p;
 
-//    printf ("Origin: "); print_vector(&ray.origin);
+//    sample_hemisphere(&ray.direction);
 
-    sample_circle(0.05, &p.x, &p.y);
-    p.z = scene->camera.lens[0].z;
+    if (scene->camera.lenses > 0) {
+      // Pick a random point on the first lens of the camera
+      float r, t;
+      vectorT p;
 
- //   printf ("Sample Circle: "); print_vector(&p);
+      r = scene->camera.lens[0].radius;
 
-  	diff_vector(&p, &ray.origin, &ray.direction);
+      r = r * random() / (float) RAND_MAX;
+      t = 2.0 * PI * random() / (float) RAND_MAX;
 
-  //  printf ("Ray Direction: "); print_vector(&ray.direction);
-  	normalize_vector(&ray.direction);
-   // printf ("Normalized: "); print_vector(&ray.direction);
-   // printf ("\n");
+      p.x = r * cos(t);
+      p.y = r * sin(t);
+      p.z = scene->camera.lens[0].z;
+
+      diff_vector (&p, &ray.origin, &ray.direction);
+      normalize_vector(&ray.direction);
+    } else {
+      // Pinhole camera
+      ray.direction.x = -ray.origin.x;
+      ray.direction.y = -ray.origin.y;
+      ray.direction.z = -1.0;
+      normalize_vector(&ray.direction);
+    }
 
   	memset (&ray.color[0], 0, sizeof(float) * 4);
 
   	hit = cast_ray_through_camera (&ray, &SCENE->camera, &camera_ray);
   	if (!hit) {
-     // TODO: This happens :)
-  	  printf ("this should never happen\n");
+     // The ray doesn't pass through the lens
      continue;
   	}
 
@@ -189,7 +165,6 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
      * MIN_SAMPLES of the running luminance doesn't vary by more 
      * than QUAL_THRESH %, we cut short the sampling.
      */
-
     // TODO: Circular buffer
     if (i == 0) {
       l_buf[i] = r + g + b;
@@ -205,12 +180,8 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
       if (j == min_samples) break;
     } 
   }
-/*
-  pixels[((y*width) + x)*3 + 0] = 255 * (i / 500.0);
-  pixels[((y*width) + x)*3 + 1] = 255 * (i / 500.0); 
-  pixels[((y*width) + x)*3 + 2] = 255 * (i / 500.0);
-*/
-	pixels[((y*width) + x)*3 + 0] = clamp(R / (float) i) * 255;
+
+  pixels[((y*width) + x)*3 + 0] = clamp(R / (float) i) * 255;
 	pixels[((y*width) + x)*3 + 1] = clamp(G / (float) i) * 255;
 	pixels[((y*width) + x)*3 + 2] = clamp(B / (float) i) * 255;
 
@@ -310,23 +281,18 @@ sceneT	*setup_scene (float idx) {
   float pink[4] = {0.89, 0.64, 0.68, 1};
 
   s = create_scene ();
+  s->camera.z = 10.0;
+  s->camera.d = 1.0;
 
-  obj = create_sphere_object(0, 0.0, -2.75, 0.9);
-  color_object (obj, pink, 0.0,0.0, 0.0, 1);
+  obj = create_sphere_object(0,0.0, -1.5 + sin(idx / 24.0), 0.2);
+  color_object (obj, pink, 0.5,0.0, 0.0, 1);
   add_object_to_scene (s, obj);
 
-  for (i=0; i<5; i++) {
-    obj = create_sphere_object(0.4*sin(PI * (idx/32.0) + i*0.1), 0.0, -2.75, 0.91+i*(0.17 + 0.17*sin(i + PI * idx/128.0)));
-    color_object (obj, sky, 0.0,0.0, 0.9, 1.1 + i*0.08*sin(PI * idx / 48.0));
+  obj = create_ortho_plane_object(0, 1, 0, -1);
+  set_object_property_function(obj, checker_property_function);
+	add_object_to_scene (s, obj);
 
-    add_object_to_scene (s, obj);
-  }
-
-  obj = create_ortho_plane_object(0, 0, 1, -10000);
-  color_object (obj, white, 0.1,0.2, 0.0, 1);
-  add_object_to_scene (s, obj);
-
-  add_lens_to_camera(&s->camera, 0, 1.1,1.7 + 0.7*sin((32+idx) / 64.0), 0.6, 1.2 + 0.2 * sin(PI * (idx +17) / 192.0));
+  add_lens_to_camera(&s->camera, 5, 3.0,3.0, 1.0, 3.0);
   add_object_to_scene(s, s->camera.lens[0].object);
 
 
@@ -338,16 +304,6 @@ sceneT	*setup_scene (float idx) {
   l = create_positional_light(-5,7,1, color);
   add_light_to_scene (s, l);
 
-  l = create_positional_light(7,-5,1, color);
-  add_light_to_scene (s, l);
-
-  color[0] = 0.7;// / (i + 1.4);
-  color[1] = color[0];
-  color[2] = color[0];
-  color[3] = color[0];
-  l = create_positional_light(-7,-5,1, color);
-  add_light_to_scene (s, l);
-
   return (s);
 }
 
@@ -357,6 +313,11 @@ void draw_gl_scene(void) {
   unsigned int  i, j;
   float   fov = 45.0f;
   float   aspect = 1.0f;
+
+  single_ray_trace_to_sensor (SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, 
+      SCREEN_WIDTH/2, SCREEN_HEIGHT/2, MIN_SAMPLES, MAX_SAMPLES, QUAL_THRESH, SCREEN_PIXELS);
+
+
 
   unsigned char key;
   key = get_last_key();
@@ -425,26 +386,24 @@ void	render_scene(void)
 
   SCENE = setup_scene(620 + frame / 100.0);
 
-	frame ++;
 
 #ifndef NO_GL
   draw_gl_scene();
 #endif //NO_GL
 
-//  SCENE->camera.z = 0 + frame / 300.0f;
-//  SCENE->camera.d = 0.5 + sin(frame / 17.0);
 
   struct timeval start, end;
 	float elapsed;
 
-  gettimeofday(&start, NULL);
-	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
-	save_screen(frame, SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT);
-
-  gettimeofday(&end, NULL);
-	elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1e6f;
-
-  printf ("[%04lu : %4.2f] %6.4fs  %6.4ffps\n", frame, frame/24.0, elapsed, 1.0 / elapsed);
+//  if (frame == 0) {
+  if (1) {
+    gettimeofday(&start, NULL);
+  	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
+  	save_screen(frame, SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT);
+    gettimeofday(&end, NULL);
+  	elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1e6f;
+    printf ("[%04lu : %4.2f] %6.4fs  %6.4ffps\n", frame, frame/24.0, elapsed, 1.0 / elapsed);
+  }
 
 #ifndef NO_GL
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
@@ -465,6 +424,7 @@ void	render_scene(void)
 	
 	glutSwapBuffers();	
 #endif // NO_GL
+  frame ++;
 }
 
 void init_screen(void) {

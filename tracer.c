@@ -484,6 +484,19 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 	return (0);
 }
 
+void copy_vector (vectorT *a, vectorT *b) {
+  b->x = a->x;
+  b->y = a->y;
+  b->z = a->z;
+}
+
+void copy_ray (rayT *a, rayT *b) {
+  copy_vector(&a->origin, &b->origin);
+  copy_vector(&a->direction, &b->direction);
+  for (int i=0; i<4; i++) b->color[i] = a->color[i];
+  b->refractive_index = a->refractive_index;
+}
+
 char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	float	sphere_parameter[4];
 	vectorT	normal;
@@ -510,7 +523,7 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	hit = ray_sphere_intersection (sphere_parameter, ray, &intersection);
 	if (!hit) return (0);
 
-	// Check tht the intersection is on the cap
+	// Check that the intersection is on the section of the sphere that is the cap of the lens
 	dist = sqrt(powf(intersection.x, 2.0f) + powf(intersection.y, 2.0f));
 	if (dist > R) return (0);
 
@@ -519,9 +532,9 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	sphere_normal(sphere_parameter, &intersection, &normal);
 	refract_vector(&ray->direction, &normal, 1, lens->refractive_index, &out->direction);
 
+  /*
 	
 	// Pass the light through the back of the lens	
-
 	sphere_parameter[0] = 0; 	// center.x
 	sphere_parameter[1] = 0;	// center.y
 	sphere_parameter[2] = z + sqrt(powf(r2, 2.0f) - powf(R,2.0f));
@@ -540,6 +553,8 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	normal.y *= -1.0;
 	normal.z *= -1.0;
 	refract_vector(&ray->direction, &normal, lens->refractive_index, 1, &out->direction);
+
+  */
 
   out->refractive_index = 1.0;
 
@@ -727,7 +742,7 @@ sceneT *create_scene (void) {
 	s->light = (lightT **) malloc (sizeof(lightT *) * s->light_array_size);
 
 	s->camera.d = 0.75;
-	s->camera.z = 1.1;
+	s->camera.z = 1.0;
 	s->camera.lenses = 0;
 
 	return (s);
@@ -960,7 +975,8 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 	if (!found_hit) return(NULL);
 
 #ifndef NO_GL
-	add_seg_to_display_buffer (&ray->origin, &nearest_intersection, 1,1,1);
+  float c = (depth) / (float) 3.0;
+	add_seg_to_display_buffer (&ray->origin, &nearest_intersection, c,c,c);
 #endif
 
 	if (surface->property_function) {

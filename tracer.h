@@ -155,6 +155,7 @@ void triangle_normal_vector (vectorT *a, vectorT *b, vectorT *c, vectorT *n);
 ** RAY CASTING
 */
 
+void    copy_ray (rayT *a, rayT *b);
 rayT    *cast_ray (rayT *ray, sceneT *scene, int depth);
 char    cast_ray_through_camera(rayT *ray, cameraT *camera, rayT *out);
 
