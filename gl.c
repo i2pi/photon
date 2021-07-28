@@ -465,28 +465,4 @@ void init_gl(int argc, char **argv)
 	set_camera();
 }
 
-void save_screen (int frame, char *rgb, int width, int height)
-{
-    static unsigned char *screen = NULL;
-    FILE    *fp;
-    char    str[256];
-
-    if (!screen) {
-        screen = (unsigned char *) malloc (sizeof (unsigned char) * width * height * 4);
-    }
-    if (!screen) {
-        fprintf (stderr, "Failed to malloc screen\n");
-        exit (-1);
-    }
-
-    snprintf (str, 250, "frame%08d.ppm", frame);
-    fp = fopen (str, "w");
-    fprintf (fp, "P6\n");
-    fprintf (fp, "%d %d 255\n", width, height);
-
-	fwrite (rgb, 1, width*height*3, fp);
-
-    fclose (fp);
-}
-
 #endif // NO_GL

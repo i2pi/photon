@@ -1,7 +1,7 @@
 INCLUDE = -I/usr/include/
 LIBDIR  = -L/usr/X11R6/lib 
 
-COMPILERFLAGS = -Wall  -O3 -DOPENGL_DEPRECATED
+COMPILERFLAGS = -Wall  -O3 -DOPENGL_DEPRECATED -DGL_SILENCE_DEPRECATION
 CC = gcc
 CFLAGS = $(COMPILERFLAGS) $(INCLUDE) 
 COMMON_LIBRARIES=
@@ -12,7 +12,7 @@ PROG=photon
 FPACK=file_pack/fpack
 
 headless: $(SRC)
-	$(CC) $(SRC) -lm -lpthread -DNO_GL $(CFLAGS) -o $(PROG) 
+	$(CC) $(SRC) -lm -lpthread -DNO_GL $(CFLAGS) -o $(PROG)_headless
 
 mac: $(SRC)
 	$(CC) $(SRC) $(CFLAGS) -o $(PROG) -DMAC $(COMMON_LIBRARIES) $(MAC_LIBRARIES)

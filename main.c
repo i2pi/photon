@@ -1,6 +1,3 @@
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#define GL_SILENCE_DEPRECATION
-
 #include <unistd.h> 
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,26 +36,26 @@ char	*SCREEN_PIXELS;
 
 void save_screen (int frame, char *rgb, int width, int height)
 {
-    static unsigned char *screen = NULL;
-    FILE    *fp;
-    char    str[256];
+  static unsigned char *screen = NULL;
+  FILE    *fp;
+  char    str[256];
 
-    if (!screen) {
-        screen = (unsigned char *) malloc (sizeof (unsigned char) * width * height * 4);
-    }
-    if (!screen) {
-        fprintf (stderr, "Failed to malloc screen\n");
-        exit (-1);
-    }
+  if (!screen) {
+    screen = (unsigned char *) malloc (sizeof (unsigned char) * width * height * 4);
+  }
+  if (!screen) {
+    fprintf (stderr, "Failed to malloc screen\n");
+    exit (-1);
+  }
 
-    snprintf (str, 250, "frame%08d.ppm", frame);
-    fp = fopen (str, "w");
-    fprintf (fp, "P6\n");
-    fprintf (fp, "%d %d 255\n", width, height);
+  snprintf (str, 250, "frame%08d.ppm", frame);
+  fp = fopen (str, "w");
+  fprintf (fp, "P6\n");
+  fprintf (fp, "%d %d 255\n", width, height);
 
-        fwrite (rgb, 1, width*height*3, fp);
+  fwrite (rgb, 1, width*height*3, fp);
 
-    fclose (fp);
+  fclose (fp);
 }
 
 float	clamp (float x) {
@@ -122,7 +119,6 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
   float r, g, b;
 	float	R, G, B;
 	vectorT	sensor_normal;
-  char  done;
 
   float l_buf[8192];
 
@@ -234,12 +230,13 @@ typedef struct {
   char    *pixels;
 } bundle_argsT;
 
-void *ray_trace_bundle_to_pixels (bundle_argsT *args) {
+void *ray_trace_bundle_to_pixels (void *void_args) {
   /*
    * Ray traces a y-section of the screen. Intended to be run
    * inside a thread. We divide by y to give some semblance of 
    * cache coherency.
    */
+  bundle_argsT *args = (bundle_argsT *) void_args;
   int x, y;
   int pixels = 0;
 
@@ -308,11 +305,9 @@ sceneT	*setup_scene (float idx) {
   lightT	*l;
   objectT	*obj;
   int		i;
-  float sea[4] = {0.15, 0.92, 0.66, 1};
   float sky[4] = {0.5, 0.70, 0.70, 1};
   float white[4] = {1, 1, 1, 1};
   float pink[4] = {0.89, 0.64, 0.68, 1};
-  float orange[4] = {1,0.7,0.4,1};
 
   s = create_scene ();
 
@@ -356,88 +351,84 @@ sceneT	*setup_scene (float idx) {
   return (s);
 }
 
+void draw_gl_scene(void) {
+#ifndef NO_GL
+  static unsigned int frame = 0;
+  unsigned int  i, j;
+  float   fov = 45.0f;
+  float   aspect = 1.0f;
+
+  unsigned char key;
+  key = get_last_key();
+
+  frame++;
+
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  gluPerspective(fov,aspect,0.1f,100.0f);
+  glTranslatef(0,0,-10);
+
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity();
+  glRotatef(frame*0.5, 0,1,0);
+
+  glViewport(0, 0, gui_state.w/2, gui_state.h);		
+
+  glClearColor(0,0,0,0);
+  glClearDepth(1);				
+  glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+
+#ifdef WIREFRAME
+  // Show the camera as axes markers
+  gl_axes_wireframe(0, 0, SCENE->camera.z);
+
+  display_ray_buffer();
+#endif	
+  for (i=0; i<SCENE->lights; i++) {
+    SCENE->light[i]->gl_draw(SCENE->light[i]);
+  }
+
+  for (i=0; i<SCENE->objects; i++) {
+    objectT *obj = SCENE->object[i];
+
+    for (j=0; j<obj->surfaces; j++) {
+      surfaceT *surf = &obj->surface[j];
+
+      // TODO: Make a gl_surface_properties() and put it in gl_draw()
+      glColor4fv (surf->properties.color);
+      glColorMaterial(GL_FRONT,GL_DIFFUSE);	
+      float black[4]={0,0,0,0};
+      glMaterialfv(GL_FRONT,GL_AMBIENT,black);
+      glMaterialfv(GL_FRONT,GL_SPECULAR,black);
+
+      surf->primitive->gl_draw(surf->parameter);
+    }
+  }
+
+  // Render Ray traced version
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity();
+
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+  glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
+
+#endif
+}
+
 
 
 void	render_scene(void)
 {
-	int		i, j;
 	static unsigned long frame = 0;
-	static char pause_rays = 0;
-	//static int x = 0, y = 0;
-	//
-#ifndef NO_GL
-	unsigned char key;
-	key = get_last_key();
-#endif
-
-
 
   SCENE = setup_scene(620 + frame / 100.0);
 
 	frame ++;
 
 #ifndef NO_GL
-
-	// Render GL version
-//	set_camera();
-	float   fov = 45.0f;
-    float   aspect = 1.0f;
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    gluPerspective(fov,aspect,0.1f,100.0f);
-	glTranslatef(0,0,-10);
-
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    if (!pause_rays) glRotatef(frame*0.5, 0,1,0);
-
-	glViewport(0, 0, gui_state.w/2, gui_state.h);		
-
-	glClearColor(0,0,0,0);
-	glClearDepth(1);				
-    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-
-#ifdef WIREFRAME
-	// Show the camera as axes markers
-	gl_axes_wireframe(0, 0, SCENE->camera.z);
-
-	display_ray_buffer();
-#endif	
-	for (i=0; i<SCENE->lights; i++) {
-		SCENE->light[i]->gl_draw(SCENE->light[i]);
-	}
-
-	for (i=0; i<SCENE->objects; i++) {
-		objectT *obj = SCENE->object[i];
-
-		for (j=0; j<obj->surfaces; j++) {
-			surfaceT *surf = &obj->surface[j];
-
-			// TODO: Make a gl_surface_properties() and put it in gl_draw()
-			glColor4fv (surf->properties.color);
-			glColorMaterial(GL_FRONT,GL_DIFFUSE);	
-			float black[4]={0,0,0,0};
-			glMaterialfv(GL_FRONT,GL_AMBIENT,black);
-			glMaterialfv(GL_FRONT,GL_SPECULAR,black);
-
-			surf->primitive->gl_draw(surf->parameter);
-		}
-	}
-
-	// Render Ray traced version
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
-	glViewport(gui_state.w/2, 0, gui_state.w/2, gui_state.h);		
-
-	switch (key) {
-		case 'p': pause_rays = pause_rays ? 0 : 1; break;
-	}
-
+  draw_gl_scene();
 #endif //NO_GL
 
 //  SCENE->camera.z = 0 + frame / 300.0f;
@@ -453,7 +444,7 @@ void	render_scene(void)
   gettimeofday(&end, NULL);
 	elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1e6f;
 
-  printf ("[%04d : %4.2f] %6.4fs  %6.4ffps\n", frame, frame/24.0, elapsed, 1.0 / elapsed);
+  printf ("[%04lu : %4.2f] %6.4fs  %6.4ffps\n", frame, frame/24.0, elapsed, 1.0 / elapsed);
 
 #ifndef NO_GL
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
@@ -486,12 +477,13 @@ void init_screen(void) {
 int main(int argc, char **argv)
 {  
 	init_primitives();
-	init_screen ();
 
 #ifndef NO_GL
 	init_gl (argc, argv);
+  init_screen ();
 	glutMainLoop();  
 #else
+  init_screen ();
 	render_scene();
 #endif //NO_GL
 
