@@ -19,9 +19,9 @@
 #define SCREEN_WIDTH	  500
 #define SCREEN_HEIGHT	  500	
 
-#define THREADS       16 
+#define THREADS       32
 #define MIN_SAMPLES   32
-#define MAX_SAMPLES   5000
+#define MAX_SAMPLES   500
 #define QUAL_THRESH   0.001
 #define TRACE_DEPTH   4
 
