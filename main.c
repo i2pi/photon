@@ -20,8 +20,8 @@
 #define SCREEN_TEXTURE_ID	1
 
 
-#define SCREEN_WIDTH	  500
-#define SCREEN_HEIGHT	  500	
+#define SCREEN_WIDTH	  2500
+#define SCREEN_HEIGHT	  2500	
 
 #define THREADS       24
 #define MIN_SAMPLES   32
