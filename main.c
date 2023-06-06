@@ -1,5 +1,4 @@
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#define GL_SILENCE_DEPRECATION
 
 #include <unistd.h> 
 #include <stdio.h>
@@ -20,13 +19,13 @@
 #define SCREEN_TEXTURE_ID	1
 
 
-#define SCREEN_WIDTH	  2500
-#define SCREEN_HEIGHT	  2500	
+#define SCREEN_WIDTH	  300
+#define SCREEN_HEIGHT	  300
 
-#define THREADS       24
+#define THREADS       8
 #define MIN_SAMPLES   32
-#define MAX_SAMPLES   4000
-#define QUAL_THRESH   0.001
+#define MAX_SAMPLES    1000
+#define QUAL_THRESH   0.01
 #define TRACE_DEPTH   64
 
 #define PI 3.1415926535
@@ -34,13 +33,19 @@
 sceneT	*SCENE;
 
 char	*SCREEN_PIXELS;
+float   *SCREEN_PIXELS_F;
 
 float	clamp (float x) {
 	if (x < 1) return (x);
 	return (1);
 }
 
-char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, int y, char *pixels) {
+float gamma(float x) {
+    x = pow(x+0.05, 1.8);
+    return (clamp(x));
+}
+
+char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, int y, char *pixels, float *pixels_f) {
   /*
    * Unused. Casts a single ray without sampling
    */
@@ -65,9 +70,13 @@ char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, in
 	
 	ret = cast_ray (&camera_ray, SCENE, TRACE_DEPTH);
 	if (ret) {
-		pixels[((y*width) + x)*3 + 0] = clamp(ret->color[0]) * 255;
-		pixels[((y*width) + x)*3 + 1] = clamp(ret->color[1]) * 255;
-		pixels[((y*width) + x)*3 + 2] = clamp(ret->color[2]) * 255;
+		pixels[((y*width) + x)*3 + 0] = gamma(ret->color[0]) * 255;
+		pixels[((y*width) + x)*3 + 1] = gamma(ret->color[1]) * 255;
+		pixels[((y*width) + x)*3 + 2] = gamma(ret->color[2]) * 255;
+
+		pixels_f[((y*width) + x)*3 + 0] = ret->color[0];
+		pixels_f[((y*width) + x)*3 + 1] = ret->color[1];
+		pixels_f[((y*width) + x)*3 + 2] = ret->color[2];
 		return (1);
 	}
 	return (0);	
@@ -83,7 +92,7 @@ void	sample_circle (float R, float *x, float *y) {
 	*y = s * sin(t);
 }
 
-char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, int y, int min_samples, int max_samples, float thresh, char *pixels) {
+char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, int y, int min_samples, int max_samples, float thresh, char *pixels, float *pixels_f) {
 	int		i, j;
 	rayT	ray, camera_ray;
 	rayT 	*ret;
@@ -92,7 +101,6 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
   float r, g, b;
 	float	R, G, B;
 	vectorT	sensor_normal;
-  char  done;
 
   float l_buf[8192];
 
@@ -176,9 +184,13 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
   pixels[((y*width) + x)*3 + 1] = 255 * (i / 500.0); 
   pixels[((y*width) + x)*3 + 2] = 255 * (i / 500.0);
 */
-	pixels[((y*width) + x)*3 + 0] = clamp(R / (float) i) * 255;
-	pixels[((y*width) + x)*3 + 1] = clamp(G / (float) i) * 255;
-	pixels[((y*width) + x)*3 + 2] = clamp(B / (float) i) * 255;
+	pixels[((y*width) + x)*3 + 0] = gamma(R / (float) i) * 255;
+	pixels[((y*width) + x)*3 + 1] = gamma(G / (float) i) * 255;
+	pixels[((y*width) + x)*3 + 2] = gamma(B / (float) i) * 255;
+
+        pixels_f[((y*width) + x)*3 + 0] = R / (float) i;
+        pixels_f[((y*width) + x)*3 + 1] = G / (float) i;
+        pixels_f[((y*width) + x)*3 + 2] = B / (float) i;
 
 	return (1);
 }
@@ -191,6 +203,7 @@ typedef struct {
   int     width, height;
   int     y_start, y_end;
   char    *pixels;
+  float   *pixels_f;
 } bundle_argsT;
 
 void *ray_trace_bundle_to_pixels (bundle_argsT *args) {
@@ -204,7 +217,7 @@ void *ray_trace_bundle_to_pixels (bundle_argsT *args) {
   for (y=args->y_start; y<args->y_end; y++) {
     for (x=0; x<args->width; x++) {
       single_ray_trace_to_sensor (args->scene, args->width, args->height, 
-          x, y, MIN_SAMPLES, MAX_SAMPLES, QUAL_THRESH, args->pixels);
+          x, y, MIN_SAMPLES, MAX_SAMPLES, QUAL_THRESH, args->pixels, args->pixels_f);
     }
   }
 
@@ -215,7 +228,7 @@ void *ray_trace_bundle_to_pixels (bundle_argsT *args) {
   return (NULL);
 }
 
-void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
+void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels, float *pixels_f) {
   int   t, y, step;
   pthread_t thread[THREADS];
   bundle_argsT  arg[THREADS];
@@ -236,10 +249,12 @@ void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels) {
       y = arg[t].y_end;
       if (t == THREADS - 1) arg[t].y_end = height;
       arg[t].pixels = pixels;
+      arg[t].pixels_f = pixels_f;
       pthread_create(&thread[t], NULL, ray_trace_bundle_to_pixels, &arg[t]);
   }
 
   while (running_threads > 0) {
+    usleep(1000);
   }
 
 }
@@ -249,39 +264,46 @@ sceneT	*setup_scene (int idx) {
   lightT	*l;
   objectT	*obj;
   int		i;
-  float sea[4] = {0.15, 0.92, 0.66, 1};
-  float sky[4] = {0.5, 0.70, 0.70, 1};
+  //float sea[4] = {0.15, 0.92, 0.66, 1};
+  float sky[4] = {0.5, 0.75, 0.75, 1};
   float white[4] = {1, 1, 1, 1};
-  float pink[4] = {0.89, 0.64, 0.68, 1};
-  float orange[4] = {1,0.7,0.4,1};
+  float pink[4] = {0.99, 0.58, 0.62, 1};
+  //float orange[4] = {1,0.7,0.4,1};
+
+  float xos, yos, zos; // offsets 
+
+  xos = yos = zos = 0.0f;
+  xos = -0.25;
+  zos = -0.3;
+
 
   s = create_scene ();
 
-  obj = create_sphere_object(0, 0.0, -2.75, 0.9);
-  color_object (obj, pink, 0.0,0.0, 0.0, 1);
+  obj = create_sphere_object(0.0+xos, 0.0+yos, -2.75+zos, 0.9);
+  color_object (obj, pink, 0.0,0.0, 0.0, 1.0);
   add_object_to_scene (s, obj);
 
-  for (i=0; i<5; i++) {
-    obj = create_sphere_object(0.4*sin(PI * (idx/32.0) + i*0.1), 0.0, -2.75, 0.91+i*(0.17 + 0.17*sin(i + PI * idx/128.0)));
+  for (i=0; i<6; i++) {
+    obj = create_sphere_object(0.4*sin(PI * (idx/32.0) + i*0.25) + xos, 0.0+yos, -2.75+zos, 0.91+i*(0.17 + 0.17*sin(i*0.98 + PI * idx/128.0)));
     color_object (obj, sky, 0.0,0.0, 0.9, 1.1 + i*0.08*sin(PI * idx / 48.0));
 
     add_object_to_scene (s, obj);
   }
 
-  obj = create_ortho_plane_object(0, 0, 1, -10000);
-  color_object (obj, white, 0.1,0.2, 0.0, 1);
+  obj = create_ortho_plane_object(0, 0, 1, -1500);
+  color_object (obj, white, 0.2,0.5, 0.0, 1);
   add_object_to_scene (s, obj);
 
-  add_lens_to_camera(&s->camera, 0, 1.1,1.7 + 0.7*sin((32+idx) / 64.0), 0.6, 1.2 + 0.2 * sin(PI * (idx +17) / 192.0));
+  add_lens_to_camera(&s->camera, 0, 1.7,1.7 + 0.7*sin((32+idx) / 64.0), 0.1, 0.95 + 0.2 * sin(PI * (idx +17) / 192.0));
   add_object_to_scene(s, s->camera.lens[0].object);
 
 
   float color[4];
-  color[0] = 1.0;// / (i + 1.4);
+  color[0] = 0.8;
   color[1] = color[0];
   color[2] = color[0];
   color[3] = color[0];
-  l = create_positional_light(-5,7,1, color);
+  l = create_positional_light(-1,7,5, color);
   add_light_to_scene (s, l);
 
   l = create_positional_light(7,-5,1, color);
@@ -297,7 +319,8 @@ sceneT	*setup_scene (int idx) {
   return (s);
 }
 
-
+//unsigned long best_frame[] = {20, 21, 112, 116, 208, 314, 389, 387, 574, 1089, 1290};
+unsigned long best_frame[] = {20,112,574};
 
 void	render_scene(void)
 {
@@ -307,7 +330,9 @@ void	render_scene(void)
 	//static int x = 0, y = 0;
 	unsigned char key;
 
-  SCENE = setup_scene(frame); // fuck it, lets just leak mem for now
+    if (frame >= 1) exit(0);
+  SCENE = setup_scene(best_frame[frame % 11]); // fuck it, lets just leak mem for now
+
 
 
 	key = get_last_key();
@@ -380,13 +405,14 @@ void	render_scene(void)
 	float elapsed;
 
   gettimeofday(&start, NULL);
-	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS);
+	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS, SCREEN_PIXELS_F);
 	save_screen(frame, SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT);
+	save_screen_f(frame, SCREEN_PIXELS_F, SCREEN_WIDTH, SCREEN_HEIGHT);
 
   gettimeofday(&end, NULL);
 	elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1e6f;
 
-  printf ("[%04d : %4.2f] %6.4fs  %6.4ffps\n", frame, frame/24.0, elapsed, 1.0 / elapsed);
+  printf ("[%04lu : %4.2f] %6.4fs  %6.4ffps\n", frame, frame/24.0, elapsed, 1.0 / elapsed);
 
 
 	draw_pixels_to_texture(SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TEXTURE_ID);
@@ -412,6 +438,7 @@ void	render_scene(void)
 void init_screen(void) {
 	init_texture_for_pixels(SCREEN_TEXTURE_ID);	
 	SCREEN_PIXELS = (char *) calloc (sizeof(char), SCREEN_WIDTH * SCREEN_HEIGHT * 3);
+	SCREEN_PIXELS_F = (float *) calloc (sizeof(float), SCREEN_WIDTH * SCREEN_HEIGHT * 3);
 }
 
 int main(int argc, char **argv)

@@ -3,7 +3,6 @@
 #include "wireframe.h"
 
 #define WIREFRAME
-#define GL_SILENCE_DEPRECATION
 
 char PRINT_DEBUG = 0;
 

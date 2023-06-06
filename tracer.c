@@ -827,7 +827,7 @@ float line_of_sight(sceneT *scene, vectorT *a, vectorT *b) {
 
 	rayT	ray;
 	int	i, j;
-  float transparency = 0.0;
+  //float transparency = 0.0;
 
 	ray.origin = *a;
 	diff_vector(b, a, &ray.direction);
@@ -849,7 +849,7 @@ float line_of_sight(sceneT *scene, vectorT *a, vectorT *b) {
 				    (dist_vector(b, &intersection) > 0.001)) {
           if (surf->properties.transparency == 0) return (-1.0);
 
-          transparency += surf->properties.transparency == 0;
+   //       transparency += surf->properties.transparency == 0;
 				}
 			}
 		}

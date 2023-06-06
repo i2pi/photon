@@ -429,8 +429,8 @@ void draw_pixels_to_texture (char *pixels, int w, int h, int tex_id) {
 
 void init_gl(int argc, char **argv)
 {
-	int	Width = 1024;
-	int Height = 512;
+	int	Width = 2048;
+	int Height = 1024;
 
 	glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA | GLUT_DEPTH);
@@ -483,6 +483,30 @@ void save_screen (int frame, char *rgb, int width, int height)
     fprintf (fp, "%d %d 255\n", width, height);
 
 	fwrite (rgb, 1, width*height*3, fp);
+
+    fclose (fp);
+}
+
+void save_screen_f (int frame, float *rgb, int width, int height)
+{
+    static unsigned char *screen = NULL;
+    FILE    *fp;
+    char    str[256];
+
+    if (!screen) {
+        screen = (unsigned char *) malloc (sizeof (unsigned char) * width * height * 4);
+    }
+    if (!screen) {
+        fprintf (stderr, "Failed to malloc screen\n");
+        exit (-1);
+    }
+
+    snprintf (str, 250, "frame%08d.float", frame);
+    fp = fopen (str, "w");
+    fprintf (fp, "PF4\n");
+    fprintf (fp, "%d %d\n-1\n", width, height);
+
+	fwrite (rgb, sizeof(float), width*height*3, fp);
 
     fclose (fp);
 }
