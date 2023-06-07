@@ -19,13 +19,13 @@
 #define SCREEN_TEXTURE_ID	1
 
 
-#define SCREEN_WIDTH	  300
-#define SCREEN_HEIGHT	  300
+#define SCREEN_WIDTH	  10800
+#define SCREEN_HEIGHT	  10800
 
-#define THREADS       8
-#define MIN_SAMPLES   32
+#define THREADS       32
+#define MIN_SAMPLES   16
 #define MAX_SAMPLES    1000
-#define QUAL_THRESH   0.01
+#define QUAL_THRESH   0.001
 #define TRACE_DEPTH   64
 
 #define PI 3.1415926535
@@ -41,7 +41,7 @@ float	clamp (float x) {
 }
 
 float gamma(float x) {
-    x = pow(x+0.05, 1.8);
+    x = pow(x-0.05, 1.1);
     return (clamp(x));
 }
 
@@ -145,7 +145,7 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
   	ret = cast_ray (&camera_ray, SCENE, TRACE_DEPTH);
 
   	if (ret) {
-			float cosine = dot_vector(&sensor_normal, &camera_ray.direction);
+			float cosine = 0.5 + 0.5* dot_vector(&sensor_normal, &camera_ray.direction);
 			r = ret->color[0] * cosine;
 			g = ret->color[1] * cosine;
 			b = ret->color[2] * cosine;
@@ -266,35 +266,35 @@ sceneT	*setup_scene (int idx) {
   int		i;
   //float sea[4] = {0.15, 0.92, 0.66, 1};
   float sky[4] = {0.5, 0.75, 0.75, 1};
-  float white[4] = {1, 1, 1, 1};
+  float white[4] = {0.95, 0.97, 0.96, 1};
   float pink[4] = {0.99, 0.58, 0.62, 1};
   //float orange[4] = {1,0.7,0.4,1};
 
   float xos, yos, zos; // offsets 
 
   xos = yos = zos = 0.0f;
-  xos = -0.25;
+  xos = -0.30;
   zos = -0.3;
 
 
   s = create_scene ();
 
   obj = create_sphere_object(0.0+xos, 0.0+yos, -2.75+zos, 0.9);
-  color_object (obj, pink, 0.0,0.0, 0.0, 1.0);
+  color_object (obj, pink, 0.0,1.0, 0.0, 1.0);
   add_object_to_scene (s, obj);
 
   for (i=0; i<6; i++) {
-    obj = create_sphere_object(0.4*sin(PI * (idx/32.0) + i*0.25) + xos, 0.0+yos, -2.75+zos, 0.91+i*(0.17 + 0.17*sin(i*0.98 + PI * idx/128.0)));
-    color_object (obj, sky, 0.0,0.0, 0.9, 1.1 + i*0.08*sin(PI * idx / 48.0));
+    obj = create_sphere_object(0.41*sin(PI * (idx/32.0) + i*0.20) + xos, 0.0+yos, -2.75+zos, 1.04+pow(i,1.155)*(0.17 + 0.17*sin(i*0.98 + PI * idx/128.0)));
+    color_object (obj, sky, 0.0,0.0, 0.97 -  i*0.025, 1.1 + i*0.09*sin(PI * idx / 48.0));
 
     add_object_to_scene (s, obj);
   }
 
-  obj = create_ortho_plane_object(0, 0, 1, -1500);
+  obj = create_ortho_plane_object(0, 0, 1, -800);
   color_object (obj, white, 0.2,0.5, 0.0, 1);
   add_object_to_scene (s, obj);
 
-  add_lens_to_camera(&s->camera, 0, 1.7,1.7 + 0.7*sin((32+idx) / 64.0), 0.1, 0.95 + 0.2 * sin(PI * (idx +17) / 192.0));
+  add_lens_to_camera(&s->camera, 0, 1.7,2.8 + 0.7*sin((32+idx) / 64.0), 0.1, 0.94 + 0.2 * sin(PI * (idx +17) / 192.0));
   add_object_to_scene(s, s->camera.lens[0].object);
 
 
@@ -306,7 +306,7 @@ sceneT	*setup_scene (int idx) {
   l = create_positional_light(-1,7,5, color);
   add_light_to_scene (s, l);
 
-  l = create_positional_light(7,-5,1, color);
+  l = create_positional_light(7,-5,4, color);
   add_light_to_scene (s, l);
 
   color[0] = 0.7;// / (i + 1.4);
