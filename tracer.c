@@ -12,6 +12,69 @@
 
 #undef DEBUG
 
+float cauchy_ri(float A, float B, float wavelength_nm) {
+	float lum = wavelength_nm / 1000.0f; // nm to micrometers
+	return A + B / (lum * lum);
+}
+
+static void wavelength_to_rgb_raw(float wl, float *r, float *g, float *b) {
+	*r = *g = *b = 0.0f;
+
+	if (wl >= 380 && wl < 440) {
+		*r = -(wl - 440.0f) / (440.0f - 380.0f);
+		*b = 1.0f;
+	} else if (wl < 490) {
+		*g = (wl - 440.0f) / (490.0f - 440.0f);
+		*b = 1.0f;
+	} else if (wl < 510) {
+		*g = 1.0f;
+		*b = -(wl - 510.0f) / (510.0f - 490.0f);
+	} else if (wl < 580) {
+		*r = (wl - 510.0f) / (580.0f - 510.0f);
+		*g = 1.0f;
+	} else if (wl < 645) {
+		*r = 1.0f;
+		*g = -(wl - 645.0f) / (645.0f - 580.0f);
+	} else if (wl <= 780) {
+		*r = 1.0f;
+	}
+
+	float t;
+	if (wl >= 380 && wl < 420)
+		t = 0.3f + 0.7f * (wl - 380.0f) / (420.0f - 380.0f);
+	else if (wl >= 700)
+		t = 0.3f + 0.7f * (780.0f - wl) / (780.0f - 700.0f);
+	else
+		t = 1.0f;
+
+	*r *= t; *g *= t; *b *= t;
+}
+
+// Normalization so uniform white spectrum integrates to (1,1,1).
+// Computed once from the shape of wavelength_to_rgb_raw.
+static float spec_norm_r = 0, spec_norm_g = 0, spec_norm_b = 0;
+
+void init_spectral(void) {
+	float rs = 0, gs = 0, bs = 0;
+	int N = 1000;
+	for (int i = 0; i < N; i++) {
+		float wl = 380.0f + 400.0f * i / (float)N;
+		float r, g, b;
+		wavelength_to_rgb_raw(wl, &r, &g, &b);
+		rs += r; gs += g; bs += b;
+	}
+	spec_norm_r = (float)N / rs;
+	spec_norm_g = (float)N / gs;
+	spec_norm_b = (float)N / bs;
+}
+
+void wavelength_to_rgb(float wl, float *r, float *g, float *b) {
+	wavelength_to_rgb_raw(wl, r, g, b);
+	*r *= spec_norm_r;
+	*g *= spec_norm_g;
+	*b *= spec_norm_b;
+}
+
 primitiveT	*SPHERE;
 primitiveT	*TRIANGLE;
 primitiveT	*ORTHO_PLANE;
@@ -264,7 +327,8 @@ void	init_surface (primitiveT *p, surfaceT *surf) {
 	surf->properties.reflectance = 0.0f;
 	surf->properties.roughness = 0.0f;
 	surf->properties.transparency = 0.0f;
-	surf->properties.refractive_index = 1.0f;
+	surf->properties.cauchy_a = 1.0f;
+	surf->properties.cauchy_b = 0.0f;
 }
 
 objectT *create_cube_object (float x, float y, float z, float d) {
@@ -383,7 +447,8 @@ void	checker_property_function (surfaceT *self, rayT *camera_ray, vectorT *inter
 	result->reflectance = 0.2;
 	result->roughness = 0.0;
 	result->transparency = 0.0;
-	result->refractive_index = 1.0;
+	result->cauchy_a = 1.0;
+	result->cauchy_b = 0.0;
 
 	int a = (int)(5000+(intersection->x * scale)) + (int)(5000+(intersection->z * scale));
 
@@ -480,11 +545,13 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	float 	dist;
 
 	float	z, r1, r2, R;
+	float	ri;
 
 	z = lens->z;
 	r1 = lens->r1;
 	r2 = lens->r2;
 	R = lens->radius;
+	ri = cauchy_ri(lens->cauchy_a, lens->cauchy_b, ray->wavelength);
 
 	// Coming in to the front of the lens
 	if (ray->origin.z < z) return(0);
@@ -505,10 +572,10 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	// Refract
 	out->origin = intersection;
 	sphere_normal(sphere_parameter, &intersection, &normal);
-	refract_vector(&ray->direction, &normal, 1, lens->refractive_index, &out->direction);
+	refract_vector(&ray->direction, &normal, 1, ri, &out->direction);
 
-	
-	// Pass the light through the back of the lens	
+
+	// Pass the light through the back of the lens
 
 	sphere_parameter[0] = 0; 	// center.x
 	sphere_parameter[1] = 0;	// center.y
@@ -516,7 +583,7 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	sphere_parameter[3] = r2;
 
 	hit = ray_sphere_intersection (sphere_parameter, out, &intersection);
-	if (!hit)  { 
+	if (!hit)  {
     // TODO - this happens often!
 		printf ("ODD\n");
 		return (0);
@@ -527,7 +594,7 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	normal.x *= -1.0;
 	normal.y *= -1.0;
 	normal.z *= -1.0;
-	refract_vector(&out->direction, &normal, lens->refractive_index, 1, &out->direction);
+	refract_vector(&out->direction, &normal, ri, 1, &out->direction);
 
   out->refractive_index = 1.0;
 
@@ -552,15 +619,16 @@ char	cast_ray_through_camera(rayT *ray, cameraT *camera, rayT *out) {
 	return (1);
 }
 
-void add_lens_to_camera (cameraT *camera, float z, float r1, float r2, float R, float refractive_index) {
+void add_lens_to_camera (cameraT *camera, float z, float r1, float r2, float R, float cauchy_a, float cauchy_b) {
 	int	i;
-		
+
 	i = camera->lenses;
 	camera->lens[i].z = z;
 	camera->lens[i].r1 = r1;
 	camera->lens[i].r2 = r2;
 	camera->lens[i].radius = R;
-	camera->lens[i].refractive_index = refractive_index;
+	camera->lens[i].cauchy_a = cauchy_a;
+	camera->lens[i].cauchy_b = cauchy_b;
 	camera->lens[i].object = create_lens_object(z, r1, r2, R);
 	camera->lenses++;
 }
@@ -644,11 +712,11 @@ char	ray_ortho_plane_intersection (float *parameter, rayT *ray, vectorT *interse
 
 
 
-void color_object (objectT *obj, float *color, 
-		float reflectance, 
+void color_object (objectT *obj, float *color,
+		float reflectance,
 		float roughness,
 		float transparency,
-		float refractive_index) {
+		float cauchy_a, float cauchy_b) {
 	int	i;
 
 	for (i=0; i<obj->surfaces; i++) {
@@ -656,7 +724,8 @@ void color_object (objectT *obj, float *color,
 		obj->surface[i].properties.reflectance = reflectance;
 		obj->surface[i].properties.roughness = roughness;
 		obj->surface[i].properties.transparency = transparency;
-		obj->surface[i].properties.refractive_index = refractive_index;
+		obj->surface[i].properties.cauchy_a = cauchy_a;
+		obj->surface[i].properties.cauchy_b = cauchy_b;
 	}
 }
 
@@ -1039,10 +1108,10 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 			diff_vector(&nearest_intersection, &ray->origin, &op);
 			if (dot_vector(&op, &rough_normal) < 0) {
 				// outside
-        
-				refraction_ray.refractive_index = properties.refractive_index;
-				refracts = refract_vector(&ray->direction, &rough_normal, 
-								ray->refractive_index, 
+
+				refraction_ray.refractive_index = cauchy_ri(properties.cauchy_a, properties.cauchy_b, ray->wavelength);
+				refracts = refract_vector(&ray->direction, &rough_normal,
+								ray->refractive_index,
 								refraction_ray.refractive_index,
 								&refraction_ray.direction);
 			} else {

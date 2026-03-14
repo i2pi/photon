@@ -14,6 +14,7 @@ typedef struct {
 	vectorT		direction;
 	float		color[4];	//RGBA
 	float		refractive_index;
+	float		wavelength;		// nm, 380-780
 } rayT;
 
 typedef struct {
@@ -31,7 +32,8 @@ typedef struct {
 	float	reflectance;
 	float	roughness;
 	float	transparency;
-	float	refractive_index;
+	float	cauchy_a;		// refractive index: n(λ) = A + B/λ²
+	float	cauchy_b;		// λ in micrometers. B=0 for non-dispersive
 } surface_propertiesT;
 
 typedef struct surfaceT {
@@ -64,8 +66,8 @@ typedef struct {
 	// Only doing spherical lenses for now.
 
 	float	z;
-	float	r1, r2;		
-	float	refractive_index;
+	float	r1, r2;
+	float	cauchy_a, cauchy_b;
 	float	radius;
 	objectT	*object;
 } lensT;
@@ -109,17 +111,17 @@ lightT	*create_positional_light (float x, float y, float z, float color[4]);
 sceneT *create_scene (void);
 void    add_object_to_scene (sceneT *s, objectT *o);
 void    add_light_to_scene (sceneT *s, lightT *o);
-void 	add_lens_to_camera (cameraT *camera, 
-			float z, float r1, float r2, float R, float refractive_index);
+void 	add_lens_to_camera (cameraT *camera,
+			float z, float r1, float r2, float R, float cauchy_a, float cauchy_b);
 
 /* 
 ** SURFACE PROPERTIES
 */
-void color_object (objectT *obj, float *color, 
-			float reflectance, 
+void color_object (objectT *obj, float *color,
+			float reflectance,
 			float roughness,
 			float transparency,
-			float refractive_index);
+			float cauchy_a, float cauchy_b);
 
 void set_object_property_function (objectT *obj, void    (*property_function)(struct surfaceT *self, rayT *camera_ray, vectorT *intersection, surface_propertiesT *result));
 
@@ -146,6 +148,13 @@ void reflect_vector (vectorT *v, vectorT *n, vectorT *r);
 char refract_vector(vectorT *v, vectorT *n, float n1, float n2, vectorT *r);
 void scale_offset_vector (vectorT *a, vectorT *d, float s, vectorT *v);
 void triangle_normal_vector (vectorT *a, vectorT *b, vectorT *c, vectorT *n);
+
+/*
+** SPECTRAL
+*/
+float cauchy_ri(float A, float B, float wavelength_nm);
+void  init_spectral(void);
+void  wavelength_to_rgb(float wavelength, float *r, float *g, float *b);
 
 /*
 ** RAY CASTING

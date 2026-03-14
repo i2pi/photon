@@ -1,32 +1,29 @@
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
-#include <unistd.h> 
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <sys/time.h>
-#include <stdio.h>
-#include <unistd.h>
 #include <string.h>
-#include <pthread.h>
 
 #include "gl.h"
 #include "tracer.h"
 #include "wireframe.h"
 #ifdef USE_METAL
 #include "metal_tracer.h"
+#else
+#include "cpu_render.h"
 #endif
 
 #define ESCAPE 27
 
 #define SCREEN_TEXTURE_ID	1
 
-
 #define SCREEN_WIDTH	  1920
 #define SCREEN_HEIGHT	  1080
 
-#define THREADS       32
-#define MIN_SAMPLES   16
+#define MIN_SAMPLES   128
 #define MAX_SAMPLES    1000
 #define QUAL_THRESH   0.1
 #define TRACE_DEPTH   8
@@ -37,231 +34,6 @@ sceneT	*SCENE;
 
 char	*SCREEN_PIXELS;
 float   *SCREEN_PIXELS_F;
-
-float	clamp (float x) {
-	if (x < 1) return (x);
-	return (1);
-}
-
-float gamma(float x) {
-    x = pow(x-0.05, 1.1);
-    return (clamp(x));
-}
-
-char single_ray_trace_to_pixels (sceneT *scene, int width, int height, int x, int y, char *pixels, float *pixels_f) {
-  /*
-   * Unused. Casts a single ray without sampling
-   */
-	rayT	ray, camera_ray;
-	rayT 	*ret;
-
-	ray.origin.x = 0.0f;
-	ray.origin.y = 0.0f;
-	ray.origin.z = scene->camera.z;
-
-	ray.direction.x = 2.0*(x / (float) width) - 1.0;
-	ray.direction.y = 2.0*(y / (float) height) - 1.0;
-	ray.direction.z = -2.445; // TODO: calc from fov
-
-	normalize_vector(&ray.direction);
-
-	ray.refractive_index = 1.0;
-
-	memset (&ray.color[0], 0, sizeof(float) * 4);
-
-	if (!cast_ray_through_camera (&ray, &SCENE->camera, &camera_ray)) return (0);
-	
-	ret = cast_ray (&camera_ray, SCENE, TRACE_DEPTH);
-	if (ret) {
-		pixels[((y*width) + x)*3 + 0] = gamma(ret->color[0]) * 255;
-		pixels[((y*width) + x)*3 + 1] = gamma(ret->color[1]) * 255;
-		pixels[((y*width) + x)*3 + 2] = gamma(ret->color[2]) * 255;
-
-		pixels_f[((y*width) + x)*3 + 0] = ret->color[0];
-		pixels_f[((y*width) + x)*3 + 1] = ret->color[1];
-		pixels_f[((y*width) + x)*3 + 2] = ret->color[2];
-		return (1);
-	}
-	return (0);	
-}
-
-void	sample_circle (float R, float *x, float *y) {
-	float	t, s;
-
-	t = 2.0 * PI * (random() / (float) RAND_MAX);
-	s = R * (random() / (float) RAND_MAX);
-
-	*x = s * cos(t);
-	*y = s * sin(t);
-}
-
-char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, int y, int min_samples, int max_samples, float thresh, char *pixels, float *pixels_f) {
-	int		i, j;
-	rayT	ray, camera_ray;
-	rayT 	*ret;
-	char	hit;
-	float 	X, Y;
-  float r, g, b;
-	float	R, G, B;
-	vectorT	sensor_normal;
-
-  float l_buf[8192];
-
-  if (max_samples > 8192) {
-      fprintf (stderr, "max_samples (%d) > 1024", max_samples);
-      exit (-1);
-  }
-
-	sensor_normal.x = 0;
-	sensor_normal.y = 0;
-	sensor_normal.z = -1;
-
-	X = 2.0*(0.5 - (x / (float) width));
-	Y = 2.0*(0.5 - (y / (float) height));
-
-	ray.origin.x = scene->camera.d * X * (width / (float) height);
-	ray.origin.y = scene->camera.d * Y;
-	ray.origin.z = scene->camera.z;
-
-	ray.refractive_index = 1.0;
-
-	R = G = B = 0.0;
-
-	for (i=0; i<max_samples; i++) {
-		vectorT p;
-
-    sample_circle(0.05, &p.x, &p.y);
-    p.z = scene->camera.lens[0].z;
-
-  	diff_vector(&p, &ray.origin, &ray.direction);
-  	normalize_vector(&ray.direction);
-
-  	memset (&ray.color[0], 0, sizeof(float) * 4);
-
-  	hit = cast_ray_through_camera (&ray, &SCENE->camera, &camera_ray);
-  	if (!hit) {
-     // TODO: This happens :)
-  	  printf ("this should never happen\n");
-     continue;
-  	}
-
-  	ret = cast_ray (&camera_ray, SCENE, TRACE_DEPTH);
-
-  	if (ret) {
-			float cosine = 0.5 + 0.5* dot_vector(&sensor_normal, &camera_ray.direction);
-			r = ret->color[0] * cosine;
-			g = ret->color[1] * cosine;
-			b = ret->color[2] * cosine;
-
-      R += r;
-      G += g;
-      B += b;
-  	} else {
-      r = g = b = 0.0;
-    }
-
-    /*
-     * Instead of taking MAX_SAMPLES for each ray, we keep a buffer
-     * of the running mean of the luminance (r+g+b). When the last
-     * MIN_SAMPLES of the running luminance doesn't vary by more 
-     * than QUAL_THRESH %, we cut short the sampling.
-     */
-
-    // TODO: Circular buffer
-    if (i == 0) {
-      l_buf[i] = r + g + b;
-    } else {
-      l_buf[i] = l_buf[i-1] + ( (r + g + b - l_buf[i-1]) / (float) (i + 1.0) );
-    }
-
-    if (i > min_samples) {
-      for (j=1; j<min_samples; j++) {
-        float score = fabs(l_buf[i-j] - l_buf[i]) / (l_buf[i]);
-        if (score > thresh) break;
-      }
-      if (j == min_samples) break;
-    } 
-  }
-/*
-  pixels[((y*width) + x)*3 + 0] = 255 * (i / 500.0);
-  pixels[((y*width) + x)*3 + 1] = 255 * (i / 500.0); 
-  pixels[((y*width) + x)*3 + 2] = 255 * (i / 500.0);
-*/
-	pixels[((y*width) + x)*3 + 0] = gamma(R / (float) i) * 255;
-	pixels[((y*width) + x)*3 + 1] = gamma(G / (float) i) * 255;
-	pixels[((y*width) + x)*3 + 2] = gamma(B / (float) i) * 255;
-
-        pixels_f[((y*width) + x)*3 + 0] = R / (float) i;
-        pixels_f[((y*width) + x)*3 + 1] = G / (float) i;
-        pixels_f[((y*width) + x)*3 + 2] = B / (float) i;
-
-	return (1);
-}
-
-volatile int running_threads = 0;
-pthread_mutex_t running_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-typedef struct {
-  sceneT  *scene;
-  int     width, height;
-  int     y_start, y_end;
-  char    *pixels;
-  float   *pixels_f;
-} bundle_argsT;
-
-void *ray_trace_bundle_to_pixels (void *arg) {
-  bundle_argsT *args = (bundle_argsT *) arg;
-  /*
-   * Ray traces a y-section of the screen. Intended to be run
-   * inside a thread. We divide by y to give some semblance of 
-   * cache coherency.
-   */
-  int x, y;
-
-  for (y=args->y_start; y<args->y_end; y++) {
-    for (x=0; x<args->width; x++) {
-      single_ray_trace_to_sensor (args->scene, args->width, args->height, 
-          x, y, MIN_SAMPLES, MAX_SAMPLES, QUAL_THRESH, args->pixels, args->pixels_f);
-    }
-  }
-
-  pthread_mutex_lock(&running_mutex);
-  running_threads--;
-  pthread_mutex_unlock(&running_mutex);
-
-  return (NULL);
-}
-
-void	ray_trace_to_pixels (sceneT *scene, int width, int height, char *pixels, float *pixels_f) {
-  int   t, y, step;
-  pthread_t thread[THREADS];
-  bundle_argsT  arg[THREADS];
-
-
-  step = floor(height / (float) THREADS);
-
-  running_threads = THREADS;
-  y = 0;
-
-  for (t=0; t<THREADS; t++) {
-      arg[t].scene = scene;
-      arg[t].width = width;
-      arg[t].height = height;
-      arg[t].y_start = y;
-      arg[t].y_end = y  + step;
-
-      y = arg[t].y_end;
-      if (t == THREADS - 1) arg[t].y_end = height;
-      arg[t].pixels = pixels;
-      arg[t].pixels_f = pixels_f;
-      pthread_create(&thread[t], NULL, ray_trace_bundle_to_pixels, &arg[t]);
-  }
-
-  while (running_threads > 0) {
-    usleep(1000);
-  }
-
-}
 
 sceneT	*setup_scene (int idx) {
   sceneT	*s;
@@ -284,21 +56,23 @@ sceneT	*setup_scene (int idx) {
   s = create_scene ();
 
   obj = create_sphere_object(0.0+xos, 0.0+yos, -2.75+zos, 0.9);
-  color_object (obj, pink, 0.0,1.0, 0.0, 1.0);
+  color_object (obj, pink, 0.0,1.0, 0.0, 1.0, 0.0);
   add_object_to_scene (s, obj);
 
   for (i=0; i<6; i++) {
+    float base_ri = 1.1 + i*0.09*sin(PI * idx / 48.0);
     obj = create_sphere_object(0.41*sin(PI * (idx/32.0) + i*0.20) + xos, 0.0+yos, -2.75+zos, 1.04+pow(i,1.155)*(0.17 + 0.17*sin(i*0.98 + PI * idx/128.0)));
-    color_object (obj, sky, 0.0,0.0, 0.97 -  i*0.025, 1.1 + i*0.09*sin(PI * idx / 48.0));
+    color_object (obj, sky, 0.0,0.0, 0.97 -  i*0.025, base_ri, 0.04);
 
     add_object_to_scene (s, obj);
   }
 
   obj = create_ortho_plane_object(0, 0, 1, -800);
-  color_object (obj, white, 0.2,0.5, 0.0, 1);
+  color_object (obj, white, 0.2,0.5, 0.0, 1.0, 0.0);
   add_object_to_scene (s, obj);
 
-  add_lens_to_camera(&s->camera, 0, 1.7,2.8 + 0.7*sin((32+idx) / 64.0), 0.1, 0.94 + 0.2 * sin(PI * (idx +17) / 192.0));
+  float lens_base_ri = 0.94 + 0.2 * sin(PI * (idx +17) / 192.0);
+  add_lens_to_camera(&s->camera, 0, 1.7,2.8 + 0.7*sin((32+idx) / 64.0), 0.1, lens_base_ri, 0.06);
   add_object_to_scene(s, s->camera.lens[0].object);
 
 
@@ -414,7 +188,9 @@ void	render_scene(void)
 		MIN_SAMPLES, MAX_SAMPLES, QUAL_THRESH, TRACE_DEPTH,
 		SCREEN_PIXELS, SCREEN_PIXELS_F);
 #else
-	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS, SCREEN_PIXELS_F);
+	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT,
+		MIN_SAMPLES, MAX_SAMPLES, QUAL_THRESH, TRACE_DEPTH,
+		SCREEN_PIXELS, SCREEN_PIXELS_F);
 #endif
 	save_screen(frame, SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT);
 	save_screen_f(frame, SCREEN_PIXELS_F, SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -454,6 +230,7 @@ void init_screen(void) {
 int main(int argc, char **argv)
 {  
 	init_primitives();
+	init_spectral();
 
 #ifdef USE_METAL
 	if (gpu_init() != 0) {

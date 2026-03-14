@@ -1,14 +1,17 @@
 #include <metal_stdlib>
 using namespace metal;
 
-#define GPU_MAX_SPHERES 32
-#define GPU_MAX_PLANES  8
-#define GPU_MAX_LIGHTS  8
+#define GPU_MAX_SPHERES  32
+#define GPU_MAX_PLANES   8
+#define GPU_MAX_LIGHTS   8
+#define GPU_MAX_BVH_NODES 64
+#define BVH_STACK_DEPTH  8
 
 struct GPUSurface {
     float cx, cy, cz, radius;
     float color_r, color_g, color_b, color_a;
-    float reflectance, roughness, transparency, refractive_index;
+    float reflectance, roughness, transparency, cauchy_a;
+    float cauchy_b, pad_s1, pad_s2, pad_s3;
 };
 
 struct GPULight {
@@ -18,7 +21,15 @@ struct GPULight {
 
 struct GPUCamera {
     float lens_z, lens_r1, lens_r2, lens_radius;
-    float lens_ri, cam_d, cam_z, has_lens;
+    float lens_cauchy_a, lens_cauchy_b, cam_d, cam_z;
+    float has_lens, pad_c0, pad_c1, pad_c2;
+};
+
+struct BVHNode {
+    float min_x, min_y, min_z, pad0;
+    float max_x, max_y, max_z, pad1;
+    int left, right;
+    int prim_start, prim_count;
 };
 
 struct GPUScene {
@@ -30,11 +41,14 @@ struct GPUScene {
     int num_spheres;
     int num_planes;
     int num_lights;
-    float pad0, pad1;
+    int num_bvh_nodes;
+    float pad0;
     GPUCamera camera;
     GPUSurface spheres[GPU_MAX_SPHERES];
     GPUSurface planes[GPU_MAX_PLANES];
     GPULight lights[GPU_MAX_LIGHTS];
+    BVHNode bvh[GPU_MAX_BVH_NODES];
+    int bvh_prim_indices[GPU_MAX_SPHERES];
 };
 
 // --- RNG (PCG variant) ---
@@ -58,6 +72,61 @@ struct RNG {
         return float(next()) / float(0xFFFFFFFFu);
     }
 };
+
+// --- Spectral helpers ---
+
+float cauchy_ri(float A, float B, float wavelength_nm) {
+    float lum = wavelength_nm / 1000.0;
+    return A + B / (lum * lum);
+}
+
+float3 wavelength_to_rgb_raw(float wl) {
+    float r = 0, g = 0, b = 0;
+
+    if (wl >= 380 && wl < 440) {
+        r = -(wl - 440.0) / (440.0 - 380.0);
+        b = 1.0;
+    } else if (wl < 490) {
+        g = (wl - 440.0) / (490.0 - 440.0);
+        b = 1.0;
+    } else if (wl < 510) {
+        g = 1.0;
+        b = -(wl - 510.0) / (510.0 - 490.0);
+    } else if (wl < 580) {
+        r = (wl - 510.0) / (580.0 - 510.0);
+        g = 1.0;
+    } else if (wl < 645) {
+        r = 1.0;
+        g = -(wl - 645.0) / (645.0 - 580.0);
+    } else if (wl <= 780) {
+        r = 1.0;
+    }
+
+    float t;
+    if (wl >= 380 && wl < 420)
+        t = 0.3 + 0.7 * (wl - 380.0) / (420.0 - 380.0);
+    else if (wl >= 700)
+        t = 0.3 + 0.7 * (780.0 - wl) / (780.0 - 700.0);
+    else
+        t = 1.0;
+
+    return float3(r * t, g * t, b * t);
+}
+
+float3 compute_spectral_norm() {
+    float rs = 0, gs = 0, bs = 0;
+    int N = 1000;
+    for (int i = 0; i < N; i++) {
+        float w = 380.0 + 400.0 * i / float(N);
+        float3 c = wavelength_to_rgb_raw(w);
+        rs += c.x; gs += c.y; bs += c.z;
+    }
+    return float3(float(N) / rs, float(N) / gs, float(N) / bs);
+}
+
+float3 wavelength_to_rgb(float wl, float3 norm) {
+    return wavelength_to_rgb_raw(wl) * norm;
+}
 
 // --- Ray-sphere intersection (matches CPU geometric approach) ---
 
@@ -100,6 +169,160 @@ bool ray_sphere_intersection(float3 center, float radius,
     }
 }
 
+// --- Ray-AABB intersection (slab method) ---
+
+bool ray_aabb_intersection(float3 origin, float3 inv_dir,
+                           float3 aabb_min, float3 aabb_max,
+                           float max_dist) {
+    float3 t1 = (aabb_min - origin) * inv_dir;
+    float3 t2 = (aabb_max - origin) * inv_dir;
+    float3 tmin = min(t1, t2);
+    float3 tmax = max(t1, t2);
+    float enter = max3(tmin.x, tmin.y, tmin.z);
+    float exit_t = min3(tmax.x, tmax.y, tmax.z);
+    return enter <= exit_t && exit_t > 0 && enter < max_dist;
+}
+
+// --- BVH traversal for sphere intersection ---
+
+bool bvh_find_nearest_sphere(float3 ray_origin, float3 ray_dir,
+                             constant GPUScene &scene,
+                             thread float &nearest_dist,
+                             thread float3 &hit_point,
+                             thread int &hit_idx) {
+    if (scene.num_bvh_nodes == 0) {
+        // Fallback to linear scan
+        bool found = false;
+        for (int i = 0; i < scene.num_spheres; i++) {
+            float3 center = float3(scene.spheres[i].cx,
+                                   scene.spheres[i].cy,
+                                   scene.spheres[i].cz);
+            float r = scene.spheres[i].radius;
+            float3 isect;
+            if (ray_sphere_intersection(center, r, ray_origin, ray_dir, isect)) {
+                float d = distance(isect, ray_origin);
+                if (d > 0.00001 && d < nearest_dist) {
+                    nearest_dist = d;
+                    hit_point = isect;
+                    hit_idx = i;
+                    found = true;
+                }
+            }
+        }
+        return found;
+    }
+
+    float3 inv_dir = 1.0 / ray_dir;
+    int stack[BVH_STACK_DEPTH];
+    int sp = 0;
+    stack[sp++] = 0;
+    bool found = false;
+
+    while (sp > 0) {
+        int ni = stack[--sp];
+        constant BVHNode &node = scene.bvh[ni];
+
+        if (!ray_aabb_intersection(ray_origin, inv_dir,
+                float3(node.min_x, node.min_y, node.min_z),
+                float3(node.max_x, node.max_y, node.max_z),
+                nearest_dist))
+            continue;
+
+        if (node.prim_count > 0) {
+            // Leaf
+            for (int i = 0; i < node.prim_count; i++) {
+                int pi = scene.bvh_prim_indices[node.prim_start + i];
+                float3 center = float3(scene.spheres[pi].cx,
+                                       scene.spheres[pi].cy,
+                                       scene.spheres[pi].cz);
+                float r = scene.spheres[pi].radius;
+                float3 isect;
+                if (ray_sphere_intersection(center, r, ray_origin, ray_dir, isect)) {
+                    float d = distance(isect, ray_origin);
+                    if (d > 0.00001 && d < nearest_dist) {
+                        nearest_dist = d;
+                        hit_point = isect;
+                        hit_idx = pi;
+                        found = true;
+                    }
+                }
+            }
+        } else {
+            // Internal node - push children
+            if (sp < BVH_STACK_DEPTH - 1) {
+                stack[sp++] = node.left;
+                stack[sp++] = node.right;
+            }
+        }
+    }
+
+    return found;
+}
+
+// --- BVH traversal for shadow rays (any-hit) ---
+
+bool bvh_any_hit_sphere(float3 a, float3 dir, float max_dist,
+                        constant GPUScene &scene) {
+    if (scene.num_bvh_nodes == 0) {
+        for (int i = 0; i < scene.num_spheres; i++) {
+            float3 center = float3(scene.spheres[i].cx,
+                                   scene.spheres[i].cy,
+                                   scene.spheres[i].cz);
+            float r = scene.spheres[i].radius;
+            float3 isect;
+            if (ray_sphere_intersection(center, r, a, dir, isect)) {
+                float da = distance(a, isect);
+                if (da > 0.001 && da < max_dist) {
+                    if (scene.spheres[i].transparency == 0)
+                        return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    float3 inv_dir = 1.0 / dir;
+    int stack[BVH_STACK_DEPTH];
+    int sp = 0;
+    stack[sp++] = 0;
+
+    while (sp > 0) {
+        int ni = stack[--sp];
+        constant BVHNode &node = scene.bvh[ni];
+
+        if (!ray_aabb_intersection(a, inv_dir,
+                float3(node.min_x, node.min_y, node.min_z),
+                float3(node.max_x, node.max_y, node.max_z),
+                max_dist))
+            continue;
+
+        if (node.prim_count > 0) {
+            for (int i = 0; i < node.prim_count; i++) {
+                int pi = scene.bvh_prim_indices[node.prim_start + i];
+                float3 center = float3(scene.spheres[pi].cx,
+                                       scene.spheres[pi].cy,
+                                       scene.spheres[pi].cz);
+                float r = scene.spheres[pi].radius;
+                float3 isect;
+                if (ray_sphere_intersection(center, r, a, dir, isect)) {
+                    float da = distance(a, isect);
+                    if (da > 0.001 && da < max_dist) {
+                        if (scene.spheres[pi].transparency == 0)
+                            return true;
+                    }
+                }
+            }
+        } else {
+            if (sp < BVH_STACK_DEPTH - 1) {
+                stack[sp++] = node.left;
+                stack[sp++] = node.right;
+            }
+        }
+    }
+
+    return false;
+}
+
 // --- Ray-plane intersection (axis-aligned planes) ---
 
 bool ray_plane_intersection(constant GPUSurface &plane,
@@ -129,23 +352,13 @@ bool ray_plane_intersection(constant GPUSurface &plane,
 bool line_of_sight(float3 a, float3 b,
                    constant GPUScene &scene) {
     float3 dir = normalize(b - a);
+    float max_dist = distance(a, b) - 0.001;
 
-    for (int i = 0; i < scene.num_spheres; i++) {
-        float3 center = float3(scene.spheres[i].cx,
-                               scene.spheres[i].cy,
-                               scene.spheres[i].cz);
-        float r = scene.spheres[i].radius;
-        float3 isect;
-        if (ray_sphere_intersection(center, r, a, dir, isect)) {
-            float da = distance(a, isect);
-            float db = distance(b, isect);
-            if (da > 0.001 && db > 0.001) {
-                if (scene.spheres[i].transparency == 0)
-                    return false;
-            }
-        }
-    }
+    // BVH-accelerated sphere test
+    if (bvh_any_hit_sphere(a, dir, max_dist, scene))
+        return false;
 
+    // Planes (linear scan - typically 1-2)
     for (int i = 0; i < scene.num_planes; i++) {
         float3 isect;
         if (ray_plane_intersection(scene.planes[i], a, dir, isect)) {
@@ -164,13 +377,13 @@ bool line_of_sight(float3 a, float3 b,
 // --- Lens refraction ---
 
 bool ray_through_lens(float3 ray_origin, float3 ray_dir,
-                      constant GPUCamera &cam,
+                      constant GPUCamera &cam, float wavelength,
                       thread float3 &out_origin, thread float3 &out_dir) {
     float z = cam.lens_z;
     float r1 = cam.lens_r1;
     float r2 = cam.lens_r2;
     float R = cam.lens_radius;
-    float ri = cam.lens_ri;
+    float ri = cauchy_ri(cam.lens_cauchy_a, cam.lens_cauchy_b, wavelength);
 
     if (ray_origin.z < z) return false;
     if (ray_dir.z > 0) return false;
@@ -226,7 +439,7 @@ float3 perturb_normal(float3 n, float roughness, thread RNG &rng) {
 // --- Iterative path tracer ---
 
 float3 trace_ray(float3 origin, float3 direction,
-                 constant GPUScene &scene, thread RNG &rng) {
+                 constant GPUScene &scene, thread RNG &rng, float wavelength) {
     float3 accumulated = float3(0);
     float3 throughput = float3(1);
 
@@ -241,23 +454,19 @@ float3 trace_ray(float3 origin, float3 direction,
         int hit_idx = -1;
         float3 hit_point;
 
-        for (int i = 0; i < scene.num_spheres; i++) {
-            float3 center = float3(scene.spheres[i].cx,
-                                   scene.spheres[i].cy,
-                                   scene.spheres[i].cz);
-            float r = scene.spheres[i].radius;
-            float3 isect;
-            if (ray_sphere_intersection(center, r, ray_origin, ray_dir, isect)) {
-                float d = distance(isect, ray_origin);
-                if (d > 0.00001 && d < nearest_dist) {
-                    nearest_dist = d;
-                    hit_point = isect;
-                    hit_type = 0;
-                    hit_idx = i;
-                }
+        // BVH-accelerated sphere intersection
+        {
+            float3 sp;
+            int si;
+            if (bvh_find_nearest_sphere(ray_origin, ray_dir, scene,
+                                        nearest_dist, sp, si)) {
+                hit_point = sp;
+                hit_type = 0;
+                hit_idx = si;
             }
         }
 
+        // Planes (linear scan - typically 1-2)
         for (int i = 0; i < scene.num_planes; i++) {
             float3 isect;
             if (ray_plane_intersection(scene.planes[i], ray_origin, ray_dir, isect)) {
@@ -341,11 +550,12 @@ float3 trace_ray(float3 origin, float3 direction,
 
             if (dot(op, rough_normal) < 0) {
                 // Outside surface
-                float eta = ray_ri / surf.refractive_index;
+                float surf_ri = cauchy_ri(surf.cauchy_a, surf.cauchy_b, wavelength);
+                float eta = ray_ri / surf_ri;
                 refracted = refract(ray_dir, rough_normal, eta);
                 if (length(refracted) > 0.001) {
                     ray_dir = refracted;
-                    ray_ri = surf.refractive_index;
+                    ray_ri = surf_ri;
                 } else {
                     ray_dir = normalize(ray_dir - 2.0 * dot(ray_dir, normal) * normal);
                 }
@@ -397,12 +607,16 @@ kernel void trace_kernel(
         scene.camera.cam_z
     );
 
+    float3 spec_norm = compute_spectral_norm();
     float R = 0, G = 0, B = 0;
     float running_mean = 0;
     float last_check_mean = 0;
     int num_samples = 0;
 
     for (int s = 0; s < scene.max_samples; s++) {
+        // Sample a random wavelength for this ray
+        float wavelength = 380.0 + 400.0 * rng.uniform();
+
         // DOF: sample point on lens
         float angle = 2.0 * M_PI_F * rng.uniform();
         float rad = 0.05 * rng.uniform();
@@ -417,7 +631,7 @@ kernel void trace_kernel(
 
         if (scene.camera.has_lens > 0.5) {
             if (!ray_through_lens(sensor_origin, ray_dir, scene.camera,
-                                  cam_origin, cam_dir)) {
+                                  wavelength, cam_origin, cam_dir)) {
                 continue;
             }
         } else {
@@ -425,7 +639,11 @@ kernel void trace_kernel(
             cam_dir = ray_dir;
         }
 
-        float3 color = trace_ray(cam_origin, cam_dir, scene, rng);
+        float3 color = trace_ray(cam_origin, cam_dir, scene, rng, wavelength);
+
+        // Spectral weighting: each wavelength sees the surface color
+        // through its spectral band (preserves surface colors)
+        color *= wavelength_to_rgb(wavelength, spec_norm);
 
         // Cosine weighting (matches CPU sensor_normal = (0,0,-1))
         float cosine = 0.5 + 0.5 * (-cam_dir.z);

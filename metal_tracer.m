@@ -6,14 +6,16 @@
 
 // --- GPU struct definitions (must match tracer.metal exactly) ---
 
-#define GPU_MAX_SPHERES 32
-#define GPU_MAX_PLANES  8
-#define GPU_MAX_LIGHTS  8
+#define GPU_MAX_SPHERES  32
+#define GPU_MAX_PLANES   8
+#define GPU_MAX_LIGHTS   8
+#define GPU_MAX_BVH_NODES 64
 
 typedef struct {
     float cx, cy, cz, radius;
     float color_r, color_g, color_b, color_a;
-    float reflectance, roughness, transparency, refractive_index;
+    float reflectance, roughness, transparency, cauchy_a;
+    float cauchy_b, pad_s1, pad_s2, pad_s3;
 } GPUSurface;
 
 typedef struct {
@@ -23,8 +25,16 @@ typedef struct {
 
 typedef struct {
     float lens_z, lens_r1, lens_r2, lens_radius;
-    float lens_ri, cam_d, cam_z, has_lens;
+    float lens_cauchy_a, lens_cauchy_b, cam_d, cam_z;
+    float has_lens, pad_c0, pad_c1, pad_c2;
 } GPUCamera;
+
+typedef struct {
+    float min_x, min_y, min_z, pad0;
+    float max_x, max_y, max_z, pad1;
+    int left, right;
+    int prim_start, prim_count;
+} BVHNode;
 
 typedef struct {
     int width, height;
@@ -35,11 +45,14 @@ typedef struct {
     int num_spheres;
     int num_planes;
     int num_lights;
-    float pad0, pad1;
+    int num_bvh_nodes;
+    float pad0;
     GPUCamera camera;
     GPUSurface spheres[GPU_MAX_SPHERES];
     GPUSurface planes[GPU_MAX_PLANES];
     GPULight lights[GPU_MAX_LIGHTS];
+    BVHNode bvh[GPU_MAX_BVH_NODES];
+    int bvh_prim_indices[GPU_MAX_SPHERES];
 } GPUScene;
 
 // --- Metal state ---
@@ -128,7 +141,76 @@ static void pack_surface(objectT *obj, int surf_idx, GPUSurface *out) {
     out->reflectance = s->properties.reflectance;
     out->roughness = s->properties.roughness;
     out->transparency = s->properties.transparency;
-    out->refractive_index = s->properties.refractive_index;
+    out->cauchy_a = s->properties.cauchy_a;
+    out->cauchy_b = s->properties.cauchy_b;
+}
+
+// --- BVH build (top-down median split) ---
+
+static BVHNode bvh_nodes_buf[GPU_MAX_BVH_NODES];
+static int bvh_node_count;
+
+static float sphere_centroid(GPUSurface *s, int axis) {
+    if (axis == 0) return s->cx;
+    if (axis == 1) return s->cy;
+    return s->cz;
+}
+
+static int build_bvh(GPUSurface *spheres, int *indices, int start, int count) {
+    if (bvh_node_count >= GPU_MAX_BVH_NODES) return -1;
+
+    int ni = bvh_node_count++;
+    BVHNode *node = &bvh_nodes_buf[ni];
+
+    // Compute AABB over primitives in [start, start+count)
+    float bmin[3] = {1e30f, 1e30f, 1e30f};
+    float bmax[3] = {-1e30f, -1e30f, -1e30f};
+    for (int i = start; i < start + count; i++) {
+        GPUSurface *s = &spheres[indices[i]];
+        float r = s->radius;
+        float c[3] = {s->cx, s->cy, s->cz};
+        for (int a = 0; a < 3; a++) {
+            if (c[a] - r < bmin[a]) bmin[a] = c[a] - r;
+            if (c[a] + r > bmax[a]) bmax[a] = c[a] + r;
+        }
+    }
+    node->min_x = bmin[0]; node->min_y = bmin[1]; node->min_z = bmin[2]; node->pad0 = 0;
+    node->max_x = bmax[0]; node->max_y = bmax[1]; node->max_z = bmax[2]; node->pad1 = 0;
+
+    if (count <= 2) {
+        node->left = -1;
+        node->right = -1;
+        node->prim_start = start;
+        node->prim_count = count;
+        return ni;
+    }
+
+    // Find longest axis
+    int axis = 0;
+    float extent = bmax[0] - bmin[0];
+    for (int a = 1; a < 3; a++) {
+        float e = bmax[a] - bmin[a];
+        if (e > extent) { extent = e; axis = a; }
+    }
+
+    // Insertion sort by centroid on chosen axis
+    for (int i = start + 1; i < start + count; i++) {
+        int key = indices[i];
+        float kv = sphere_centroid(&spheres[key], axis);
+        int j = i - 1;
+        while (j >= start && sphere_centroid(&spheres[indices[j]], axis) > kv) {
+            indices[j + 1] = indices[j];
+            j--;
+        }
+        indices[j + 1] = key;
+    }
+
+    int mid = count / 2;
+    node->prim_start = 0;
+    node->prim_count = 0;
+    node->left = build_bvh(spheres, indices, start, mid);
+    node->right = build_bvh(spheres, indices, start + mid, count - mid);
+    return ni;
 }
 
 static float gpu_gamma(float x) {
@@ -170,7 +252,8 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             gpu_scene.camera.lens_r1 = lens->r1;
             gpu_scene.camera.lens_r2 = lens->r2;
             gpu_scene.camera.lens_radius = lens->radius;
-            gpu_scene.camera.lens_ri = lens->refractive_index;
+            gpu_scene.camera.lens_cauchy_a = lens->cauchy_a;
+            gpu_scene.camera.lens_cauchy_b = lens->cauchy_b;
             gpu_scene.camera.has_lens = 1.0f;
         }
 
@@ -196,6 +279,19 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
 
         gpu_scene.num_spheres = n_spheres;
         gpu_scene.num_planes = n_planes;
+
+        // Build BVH over spheres
+        if (n_spheres > 0) {
+            int indices[GPU_MAX_SPHERES];
+            for (int i = 0; i < n_spheres; i++) indices[i] = i;
+            bvh_node_count = 0;
+            build_bvh(gpu_scene.spheres, indices, 0, n_spheres);
+            gpu_scene.num_bvh_nodes = bvh_node_count;
+            memcpy(gpu_scene.bvh, bvh_nodes_buf, sizeof(BVHNode) * bvh_node_count);
+            memcpy(gpu_scene.bvh_prim_indices, indices, sizeof(int) * n_spheres);
+        } else {
+            gpu_scene.num_bvh_nodes = 0;
+        }
 
         // Lights
         gpu_scene.num_lights = scene->lights < GPU_MAX_LIGHTS ? scene->lights : GPU_MAX_LIGHTS;

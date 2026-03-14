@@ -14,8 +14,8 @@ FPACK=file_pack/fpack
 mac: $(SRC) metal_tracer.m tracer.metal
 	$(CC) $(SRC) metal_tracer.m $(CFLAGS) -o $(PROG) -DMAC -DUSE_METAL -fobjc-arc $(COMMON_LIBRARIES) $(MAC_LIBRARIES) -framework Metal -framework Foundation
 
-cpu: $(SRC)
-	$(CC) $(SRC) $(CFLAGS) -o $(PROG) -DMAC $(COMMON_LIBRARIES) $(MAC_LIBRARIES)
+cpu: $(SRC) cpu_render.c
+	$(CC) $(SRC) cpu_render.c $(CFLAGS) -o $(PROG) -DMAC $(COMMON_LIBRARIES) $(MAC_LIBRARIES)
 
 dist:
 	strip $(PROG)
