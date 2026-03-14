@@ -48,6 +48,7 @@ unsigned char get_last_key (void);
 void init_texture_for_pixels (int tex_id);
 void draw_pixels_to_texture (char *pixels, int w, int h, int tex_id);
 void save_screen (int frame, char *rgb, int width, int height);
+void save_screen_f (int frame, float *rgb, int width, int height);
 
 
 #endif

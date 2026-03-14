@@ -2,7 +2,7 @@
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
-#include <unistd.h> 
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -26,16 +26,16 @@ float	tick_length = 0.05;
 void set_camera (void) {
 	float	fov = 45.0f;
 	float	aspect = 1.0f;
-	
+
 	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();			
+	glLoadIdentity();
 	gluPerspective(fov,aspect,0.1f,100.0f);
 	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();			
+	glLoadIdentity();
 }
 
 void gl_positional_light(GLenum light, float x, float y, float z, float *color) {
-	
+
 	float pos[4];
 #ifndef WIREFRAME
 	float nil[4] = {0,0,0,0};
@@ -46,7 +46,7 @@ void gl_positional_light(GLenum light, float x, float y, float z, float *color) 
 	pos[3] = 1.0; // Indicates this is a positional light
 
 #ifndef WIREFRAME
-	glEnable(light);                   	
+	glEnable(light);
 	glLightfv (light, GL_POSITION, pos);
 	glLightfv (light, GL_DIFFUSE, color);
 	glLightfv (light, GL_SPECULAR, color);
@@ -58,7 +58,7 @@ void ReSizeGLScene(int Width, int Height)
 {
 	if (Height==0)	Height=1;
 
-	glViewport(0, 0, Width/2, Height);		
+	glViewport(0, 0, Width/2, Height);
 	set_camera();
 	gui_state.w = Width;
 	gui_state.h = Height;
@@ -75,14 +75,14 @@ void	print (float x, float y, char *text)
 	}
 }
 
-void keyPressed(unsigned char key, int x, int y) 
+void keyPressed(unsigned char key, int x, int y)
 {
     usleep(100);
 
-    if (key == ESCAPE) 
-    { 
-      glutDestroyWindow(gui_state.window); 
-      exit(0);                   
+    if (key == ESCAPE)
+    {
+      glutDestroyWindow(gui_state.window);
+      exit(0);
     }
 
 	gui_state.last_key = key;
@@ -110,7 +110,7 @@ void gl_sphere (float x, float y, float z, float r, int segments) {
 		p_norm[i].x = 0;
 		p_norm[i].y = -1;
 		p_norm[i].z = 0;
-	}	
+	}
 
 	for (i=1; i<segments; i++) {
 		float h = r * ((2.0f * i / (float) (segments-1)) - 1.0f);
@@ -124,13 +124,13 @@ void gl_sphere (float x, float y, float z, float r, int segments) {
 			norm[j].x = sin(t);
 			norm[j].y = h / r;
 			norm[j].z = cos(t);
-			normalize_vector(&norm[j]); 
+			normalize_vector(&norm[j]);
 		}
 
 		for (j=0; j<segments; j++) {
-			int	n = (j+1) % segments;	
+			int	n = (j+1) % segments;
 
-			float	vertex[9];	
+			float	vertex[9];
 			float	normal[9];
 
 			// pointing up
@@ -188,8 +188,8 @@ void gl_show_ray_tick (float vertex[3], float normal[3]) {
 	glBegin(GL_LINES);
 	glColor4f(1,1,0,1);
 	glVertex3f(vertex[0], vertex[1], vertex[2]);
-	glVertex3f(vertex[0]+s*normal[0], 
-		vertex[1]+s*normal[1], 
+	glVertex3f(vertex[0]+s*normal[0],
+		vertex[1]+s*normal[1],
 		vertex[2]+s*normal[2]);
 	glEnd();
 }
@@ -248,16 +248,16 @@ void gl_ortho_plane (float nx, float ny, float nz, float pos, float W, int N) {
 			y = -W + i*step;
 			z = -W + j*step;
 			glBegin(GL_LINES);
-			glColor4f(0,1,0,1);	
+			glColor4f(0,1,0,1);
 			glVertex3f(x, y, z);
 			glVertex3f(x, y+step, z);
 			glVertex3f(x, y, z+step);
 			glVertex3f(x, y, z);
-			glEnd();	
+			glEnd();
 			params_to_array(x,y,z, v);
 			gl_show_ray_tick(v, n);
 		}
-	} else 
+	} else
 	if (ny != 0) {
 		// horitzontal plane
 		for (i=0; i<N; i++)
@@ -266,12 +266,12 @@ void gl_ortho_plane (float nx, float ny, float nz, float pos, float W, int N) {
 			y = ny * pos;
 			z = -W + j*step;
 			glBegin(GL_LINES);
-			glColor4f(0,1,0,1);	
+			glColor4f(0,1,0,1);
 			glVertex3f(x, y, z);
 			glVertex3f(x+step, y, z);
 			glVertex3f(x, y, z+step);
 			glVertex3f(x, y, z);
-			glEnd();	
+			glEnd();
 			params_to_array(x,y,z, v);
 			gl_show_ray_tick(v, n);
 		}
@@ -283,12 +283,12 @@ void gl_ortho_plane (float nx, float ny, float nz, float pos, float W, int N) {
 			y = -W + j*step;
 			z = nz * pos;
 			glBegin(GL_LINES);
-			glColor4f(0,1,0,1);	
+			glColor4f(0,1,0,1);
 			glVertex3f(x, y, z);
 			glVertex3f(x+step, y, z);
 			glVertex3f(x, y+step, z);
 			glVertex3f(x, y, z);
-			glEnd();	
+			glEnd();
 			params_to_array(x,y,z, v);
 			gl_show_ray_tick(v, n);
 		}
@@ -377,9 +377,9 @@ void gl_xy_sphere_cap (float r, float R, float z, int segments) {
 		}
 
 		for (j=0; j<segments; j++) {
-			int	n = (j+1) % segments;	
+			int	n = (j+1) % segments;
 
-			float	vertex[9];	
+			float	vertex[9];
 			float	normal[9];
 
 			// pointing up
@@ -431,8 +431,8 @@ void draw_pixels_to_texture (char *pixels, int w, int h, int tex_id) {
 
 void init_gl(int argc, char **argv)
 {
-	int	Width = 1024;
-	int Height = 512;
+	int	Width = 2048;
+	int Height = 1024;
 
 	glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_ALPHA | GLUT_DEPTH);
@@ -447,10 +447,10 @@ void init_gl(int argc, char **argv)
 
 	glEnable(GL_TEXTURE_2D);
 	glEnable(GL_LINE_SMOOTH);
-	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST); 
-	glDepthFunc(GL_LESS);			   
-	glEnable(GL_DEPTH_TEST);		  
-	glShadeModel(GL_SMOOTH);		
+	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+	glDepthFunc(GL_LESS);
+	glEnable(GL_DEPTH_TEST);
+	glShadeModel(GL_SMOOTH);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -463,6 +463,54 @@ void init_gl(int argc, char **argv)
 	gui_state.h = Height;
 
 	set_camera();
+}
+
+void save_screen (int frame, char *rgb, int width, int height)
+{
+    static unsigned char *screen = NULL;
+    FILE    *fp;
+    char    str[256];
+
+    if (!screen) {
+        screen = (unsigned char *) malloc (sizeof (unsigned char) * width * height * 4);
+    }
+    if (!screen) {
+        fprintf (stderr, "Failed to malloc screen\n");
+        exit (-1);
+    }
+
+    snprintf (str, 250, "frame%08d.ppm", frame);
+    fp = fopen (str, "w");
+    fprintf (fp, "P6\n");
+    fprintf (fp, "%d %d 255\n", width, height);
+
+	fwrite (rgb, 1, width*height*3, fp);
+
+    fclose (fp);
+}
+
+void save_screen_f (int frame, float *rgb, int width, int height)
+{
+    static unsigned char *screen = NULL;
+    FILE    *fp;
+    char    str[256];
+
+    if (!screen) {
+        screen = (unsigned char *) malloc (sizeof (unsigned char) * width * height * 4);
+    }
+    if (!screen) {
+        fprintf (stderr, "Failed to malloc screen\n");
+        exit (-1);
+    }
+
+    snprintf (str, 250, "frame%08d.float", frame);
+    fp = fopen (str, "w");
+    fprintf (fp, "PF4\n");
+    fprintf (fp, "%d %d\n-1\n", width, height);
+
+	fwrite (rgb, sizeof(float), width*height*3, fp);
+
+    fclose (fp);
 }
 
 #endif // NO_GL

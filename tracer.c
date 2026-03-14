@@ -14,6 +14,69 @@
 
 #undef DEBUG
 
+float cauchy_ri(float A, float B, float wavelength_nm) {
+	float lum = wavelength_nm / 1000.0f; // nm to micrometers
+	return A + B / (lum * lum);
+}
+
+static void wavelength_to_rgb_raw(float wl, float *r, float *g, float *b) {
+	*r = *g = *b = 0.0f;
+
+	if (wl >= 380 && wl < 440) {
+		*r = -(wl - 440.0f) / (440.0f - 380.0f);
+		*b = 1.0f;
+	} else if (wl < 490) {
+		*g = (wl - 440.0f) / (490.0f - 440.0f);
+		*b = 1.0f;
+	} else if (wl < 510) {
+		*g = 1.0f;
+		*b = -(wl - 510.0f) / (510.0f - 490.0f);
+	} else if (wl < 580) {
+		*r = (wl - 510.0f) / (580.0f - 510.0f);
+		*g = 1.0f;
+	} else if (wl < 645) {
+		*r = 1.0f;
+		*g = -(wl - 645.0f) / (645.0f - 580.0f);
+	} else if (wl <= 780) {
+		*r = 1.0f;
+	}
+
+	float t;
+	if (wl >= 380 && wl < 420)
+		t = 0.3f + 0.7f * (wl - 380.0f) / (420.0f - 380.0f);
+	else if (wl >= 700)
+		t = 0.3f + 0.7f * (780.0f - wl) / (780.0f - 700.0f);
+	else
+		t = 1.0f;
+
+	*r *= t; *g *= t; *b *= t;
+}
+
+// Normalization so uniform white spectrum integrates to (1,1,1).
+// Computed once from the shape of wavelength_to_rgb_raw.
+static float spec_norm_r = 0, spec_norm_g = 0, spec_norm_b = 0;
+
+void init_spectral(void) {
+	float rs = 0, gs = 0, bs = 0;
+	int N = 1000;
+	for (int i = 0; i < N; i++) {
+		float wl = 380.0f + 400.0f * i / (float)N;
+		float r, g, b;
+		wavelength_to_rgb_raw(wl, &r, &g, &b);
+		rs += r; gs += g; bs += b;
+	}
+	spec_norm_r = (float)N / rs;
+	spec_norm_g = (float)N / gs;
+	spec_norm_b = (float)N / bs;
+}
+
+void wavelength_to_rgb(float wl, float *r, float *g, float *b) {
+	wavelength_to_rgb_raw(wl, r, g, b);
+	*r *= spec_norm_r;
+	*g *= spec_norm_g;
+	*b *= spec_norm_b;
+}
+
 primitiveT	*SPHERE;
 primitiveT	*TRIANGLE;
 primitiveT	*ORTHO_PLANE;
@@ -54,7 +117,7 @@ float length_vector (vectorT *v) {
 	// |v|
 	float len;
 	len = sqrt(v->x*v->x + v->y*v->y + v->z*v->z);
-	return (len);	
+	return (len);
 }
 
 void normalize_vector (vectorT *v) {
@@ -81,7 +144,7 @@ float dist_vector (vectorT *a, vectorT *b) {
 float	dot_vector (vectorT *a, vectorT *b) {
 	// a . b
 	float d;
-	d = a->x * b->x + 
+	d = a->x * b->x +
 		a->y * b->y +
 		a->z * b->z;
 	return (d);
@@ -94,8 +157,8 @@ float	cosine_vector (vectorT *a, vectorT *b) {
 
 void cross_vector(vectorT *a, vectorT *b, vectorT *v) {
 	// v = a x b
-	v->x = a->y * b->z - b->y * a->z; 
-	v->y = a->z * b->x - b->z * a->x; 
+	v->x = a->y * b->z - b->y * a->z;
+	v->y = a->z * b->x - b->z * a->x;
 	v->z = a->x * b->y - b->x * a->y;
 }
 
@@ -114,7 +177,7 @@ void project_point_on_ray (rayT *ray, vectorT *point, vectorT *projection) {
 
 	diff_vector (point, &ray->origin, &pr);
 	d = dot_vector(&pr, &ray->direction);
-    
+
 	scale_offset_vector(&ray->origin, &ray->direction, d, projection);
 }
 
@@ -151,17 +214,17 @@ char refract_vector(vectorT *v, vectorT *n, float n1, float n2, vectorT *r) {
 	// r = refraction of v against normal n on boundary of n1:n2
 
 	// http://steve.hollasch.net/cgindex/render/refraction.txt
-	
+
    //Vector3  I, N, T;		/* incoming, normal and Transmitted */
 	double eta, c1, cs2 ;
 
-	eta = n1 / n2 ;			
+	eta = n1 / n2 ;
 	c1 = -dot_vector(v, n);
 	cs2 = 1.0 - pow(eta, 2.0) * (1 - pow(c1, 2.0));
 
 	if (cs2 < 0)
-		return (0);		// total internal reflection 
-	
+		return (0);		// total internal reflection
+
 	r->x = eta * v->x + (eta * c1 - sqrt(cs2)) * n->x;
 	r->y = eta * v->y + (eta * c1 - sqrt(cs2)) * n->y;
 	r->z = eta * v->z + (eta * c1 - sqrt(cs2)) * n->z;
@@ -178,15 +241,15 @@ void triangle_normal_vector (vectorT *a, vectorT *b, vectorT *c, vectorT *n) {
 	normalize_vector(n);
 }
 
-primitiveT	*create_primitive(char *name, 
-					void (*gl_draw)(float *p), 
-					char (*ray_intersects)(float *p, rayT *r, vectorT *i), 
+primitiveT	*create_primitive(char *name,
+					void (*gl_draw)(float *p),
+					char (*ray_intersects)(float *p, rayT *r, vectorT *i),
 					void (*normal)(float *p, vectorT *pt, vectorT *n),
-					int parameters, 
+					int parameters,
 					...) {
 	va_list	ap;
 	int		i;
-	
+
 	primitiveT *p;
 
 	p = (primitiveT *) malloc (sizeof(primitiveT));
@@ -212,7 +275,7 @@ primitiveT	*create_primitive(char *name,
 	return (p);
 }
 
-void cube_gl_draw(float *parameter) {	
+void cube_gl_draw(float *parameter) {
 #ifndef NO_GL
 	gl_cube(parameter[0], parameter[1], parameter[2], parameter[3]);
 #endif
@@ -262,7 +325,7 @@ objectT *create_object (int surfaces) {
 	objectT *obj;
 
 	obj = (objectT *) malloc (sizeof(objectT));
-	
+
 	obj->surfaces = surfaces;
 	obj->surface = (surfaceT *) malloc (sizeof (surfaceT) * obj->surfaces);
 
@@ -270,13 +333,14 @@ objectT *create_object (int surfaces) {
 }
 
 void	init_surface (primitiveT *p, surfaceT *surf) {
-	surf->primitive = p;	
+	surf->primitive = p;
 	surf->parameter = (float *) malloc (sizeof(float) * p->parameters);
 	surf->property_function = NULL;
 	surf->properties.reflectance = 0.0f;
 	surf->properties.roughness = 0.0f;
 	surf->properties.transparency = 0.0f;
-	surf->properties.refractive_index = 1.0f;
+	surf->properties.cauchy_a = 1.0f;
+	surf->properties.cauchy_b = 0.0f;
 }
 
 objectT *create_cube_object (float x, float y, float z, float d) {
@@ -292,13 +356,13 @@ objectT *create_cube_object (float x, float y, float z, float d) {
 	}
 
 	params_to_vector (x-d, y+d, z-d, &cube[0]);  // Front, top, left
-	params_to_vector (x+d, y+d, z-d, &cube[1]);  // Front, top, right 
-	params_to_vector (x+d, y-d, z-d, &cube[2]);  // Front, bottom, right 
+	params_to_vector (x+d, y+d, z-d, &cube[1]);  // Front, top, right
+	params_to_vector (x+d, y-d, z-d, &cube[2]);  // Front, bottom, right
 	params_to_vector (x-d, y-d, z-d, &cube[3]);  // Front, bottom, left
 
 	params_to_vector (x-d, y+d, z+d, &cube[4]);  // Back, top, left
-	params_to_vector (x+d, y+d, z+d, &cube[5]);  // Back, top, right 
-	params_to_vector (x+d, y-d, z+d, &cube[6]);  // Back, bottom, right 
+	params_to_vector (x+d, y+d, z+d, &cube[5]);  // Back, top, right
+	params_to_vector (x+d, y-d, z+d, &cube[6]);  // Back, bottom, right
 	params_to_vector (x-d, y-d, z+d, &cube[7]);  // Back, bottom, left
 
 	// Back (0, 1, 2, 3)
@@ -337,11 +401,11 @@ objectT *create_cube_object (float x, float y, float z, float d) {
 
 objectT *create_sphere_object (float x, float y, float z, float r) {
 	objectT *obj;
-	surfaceT *surf;	
+	surfaceT *surf;
 
 	obj = create_object(1);
-	
-	surf = &obj->surface[0];	
+
+	surf = &obj->surface[0];
 	init_surface (SPHERE, surf);
 	surf->parameter[0] = x;
 	surf->parameter[1] = y;
@@ -354,10 +418,10 @@ objectT *create_sphere_object (float x, float y, float z, float r) {
 objectT *create_lens_object (float z, float r1, float r2, float R) {
 	objectT 	*obj;
 	surfaceT	*surf;
-	
-	obj = create_object(1);	
+
+	obj = create_object(1);
 	surf = &obj->surface[0];
-	init_surface(LENS, surf);	
+	init_surface(LENS, surf);
 	surf->parameter[0] = z;
 	surf->parameter[1] = r1;
 	surf->parameter[2] = r2;
@@ -368,11 +432,11 @@ objectT *create_lens_object (float z, float r1, float r2, float R) {
 
 objectT *create_ortho_plane_object (float nx, float ny, float nz, float pos) {
 	objectT *obj;
-	surfaceT *surf;	
+	surfaceT *surf;
 
 	obj = create_object(1);
-	
-	surf = &obj->surface[0];	
+
+	surf = &obj->surface[0];
 	init_surface (ORTHO_PLANE, surf);
 	surf->parameter[0] = nx;
 	surf->parameter[1] = ny;
@@ -395,7 +459,8 @@ void	checker_property_function (surfaceT *self, rayT *camera_ray, vectorT *inter
 	result->reflectance = 0.2;
 	result->roughness = 0.0;
 	result->transparency = 0.0;
-	result->refractive_index = 1.0;
+	result->cauchy_a = 1.0;
+	result->cauchy_b = 0.0;
 
 	int a = (int)(5000+(intersection->x * scale)) + (int)(5000+(intersection->z * scale));
 
@@ -436,11 +501,11 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 	vpc_len = length_vector(&vpc);
 
 	project_point_on_ray (ray, &sphere_center, &pc);
-	
+
 	if (dot_vector(&vpc, &ray->direction) < 0) {
 		if (vpc_len > radius) {
 			return (0);
-		} else 
+		} else
 		if (vpc_len == radius) {
 			// Ray starts at surface
 			*intersection = ray->origin;
@@ -449,11 +514,11 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 			float	dist, d;
 
 			dist = sqrt(
-							powf(radius,2.0f) - 
+							powf(radius,2.0f) -
 							powf(dist_vector(&pc, &sphere_center), 2.0f)
 						);
 			d = dist - dist_vector(&pc, &ray->origin);
-	
+
 			scale_offset_vector (&ray->origin, &ray->direction, d, intersection);
 			return (1);
 		}
@@ -463,24 +528,24 @@ char	ray_sphere_intersection (float *parameter, rayT *ray, vectorT *intersection
 			return (0);
 		} else {
 			float dist = sqrt(
-							powf(radius,2.0f) - 
+							powf(radius,2.0f) -
 							powf(dist_vector(&pc, &sphere_center), 2.0f)
 						);
 			float	d;
 
-			// epsilon hack :/ 
+			// epsilon hack :/
 			if ((vpc_len + 0.00001) >= radius) {
 				d = dist_vector(&pc, &ray->origin) - dist;
 			} else {
 				d = dist_vector(&pc, &ray->origin) + dist;
-			} 
+			}
 			scale_offset_vector (&ray->origin, &ray->direction, d, intersection);
 			return (1);
 		}
 	}
 
 	fprintf (stderr, "shouldn't be here\n");
-	exit (-1);	
+	exit (-1);
 	return (0);
 }
 
@@ -505,11 +570,13 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	float 	dist;
 
 	float	z, r1, r2, R;
+	float	ri;
 
 	z = lens->z;
 	r1 = lens->r1;
 	r2 = lens->r2;
 	R = lens->radius;
+	ri = cauchy_ri(lens->cauchy_a, lens->cauchy_b, ray->wavelength);
 
 	// Coming in to the front of the lens
 	if (ray->origin.z < z) return(0);
@@ -530,18 +597,18 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	// Refract
 	out->origin = intersection;
 	sphere_normal(sphere_parameter, &intersection, &normal);
-	refract_vector(&ray->direction, &normal, 1, lens->refractive_index, &out->direction);
+	refract_vector(&ray->direction, &normal, 1, ri, &out->direction);
 
-  /*
-	
-	// Pass the light through the back of the lens	
+
+	// Pass the light through the back of the lens
+
 	sphere_parameter[0] = 0; 	// center.x
 	sphere_parameter[1] = 0;	// center.y
 	sphere_parameter[2] = z + sqrt(powf(r2, 2.0f) - powf(R,2.0f));
 	sphere_parameter[3] = r2;
 
 	hit = ray_sphere_intersection (sphere_parameter, out, &intersection);
-	if (!hit)  { 
+	if (!hit)  {
     // TODO - this happens often!
 		printf ("ODD\n");
 		return (0);
@@ -552,9 +619,7 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	normal.x *= -1.0;
 	normal.y *= -1.0;
 	normal.z *= -1.0;
-	refract_vector(&ray->direction, &normal, lens->refractive_index, 1, &out->direction);
-
-  */
+	refract_vector(&out->direction, &normal, ri, 1, &out->direction);
 
   out->refractive_index = 1.0;
 
@@ -581,15 +646,16 @@ char	cast_ray_through_camera(rayT *ray, cameraT *camera, rayT *out) {
 	return (1);
 }
 
-void add_lens_to_camera (cameraT *camera, float z, float r1, float r2, float R, float refractive_index) {
+void add_lens_to_camera (cameraT *camera, float z, float r1, float r2, float R, float cauchy_a, float cauchy_b) {
 	int	i;
-		
+
 	i = camera->lenses;
 	camera->lens[i].z = z;
 	camera->lens[i].r1 = r1;
 	camera->lens[i].r2 = r2;
 	camera->lens[i].radius = R;
-	camera->lens[i].refractive_index = refractive_index;
+	camera->lens[i].cauchy_a = cauchy_a;
+	camera->lens[i].cauchy_b = cauchy_b;
 	camera->lens[i].object = create_lens_object(z, r1, r2, R);
 	camera->lenses++;
 }
@@ -637,7 +703,7 @@ char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersecti
 	if (t > 0.00001) {
 		scale_offset_vector (&ray->origin, &ray->direction, t, intersection);
 		return (1);
-	} 
+	}
 
 	return (0);
 }
@@ -645,40 +711,39 @@ char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersecti
 char	ray_ortho_plane_intersection (float *parameter, rayT *ray, vectorT *intersection) {
 	vectorT normal;
 	vectorT pos;
-	float d;
+	float t;
 
 	array_to_vector(&parameter[0], &normal);
 
 	pos = normal;
 	scale_vector(&pos, parameter[3]);
 
-	d = dot_vector(&normal, &ray->direction);
-
-	if (d >= 0) {	
+	if (dot_vector(&normal, &ray->direction) >= 0) {
 		return (0);
 	}
-	
 	if (normal.x != 0) {
-		d = (pos.x - ray->origin.x) / ray->direction.x;
-	} else 
+		t = (pos.x - ray->origin.x) / ray->direction.x;
+	} else
 	if (normal.y != 0) {
-		d = (pos.y - ray->origin.y) / ray->direction.y;
+		t = (pos.y - ray->origin.y) / ray->direction.y;
 	} else {
-		d = (pos.z - ray->origin.z) / ray->direction.z;
+		t = (pos.z - ray->origin.z) / ray->direction.z;
 	}
 
-	scale_offset_vector(&ray->origin, &ray->direction, d, intersection);
+	if (t < 0.00001) return (0);
+
+	scale_offset_vector(&ray->origin, &ray->direction, t, intersection);
 
 	return (1);
 }
 
 
 
-void color_object (objectT *obj, float *color, 
-		float reflectance, 
+void color_object (objectT *obj, float *color,
+		float reflectance,
 		float roughness,
 		float transparency,
-		float refractive_index) {
+		float cauchy_a, float cauchy_b) {
 	int	i;
 
 	for (i=0; i<obj->surfaces; i++) {
@@ -686,7 +751,8 @@ void color_object (objectT *obj, float *color,
 		obj->surface[i].properties.reflectance = reflectance;
 		obj->surface[i].properties.roughness = roughness;
 		obj->surface[i].properties.transparency = transparency;
-		obj->surface[i].properties.refractive_index = refractive_index;
+		obj->surface[i].properties.cauchy_a = cauchy_a;
+		obj->surface[i].properties.cauchy_b = cauchy_b;
 	}
 }
 
@@ -715,8 +781,8 @@ void init_primitives (void) {
 	SPHERE = create_primitive("sphere", sphere_gl_draw, ray_sphere_intersection, sphere_normal,
 							4, "x", "y", "z", "r");
 	TRIANGLE = create_primitive("triangle", triangle_gl_draw, ray_triangle_intersection, triangle_normal,
-							12, "x1", "y1", "z1", 
-							   "x2", "y2", "z2", 
+							12, "x1", "y1", "z1",
+							   "x2", "y2", "z2",
 							   "x3", "y3", "z3",
 							   "nx", "ny", "nz");
 
@@ -773,7 +839,7 @@ void	add_light_to_scene (sceneT *s, lightT *l) {
 
 void positional_light_gl_draw (lightT *self) {
 #ifndef NO_GL
-	gl_positional_light(self->GL_LIGHT, 
+	gl_positional_light(self->GL_LIGHT,
 		self->position.x, self->position.y, self->position.z, self->color);
 #endif
 }
@@ -784,7 +850,7 @@ lightT	*create_positional_light (float x, float y, float z, float color[4]) {
 	l = (lightT *) malloc (sizeof(lightT));
 
 	params_to_vector (x,y,z, &l->position);
-	
+
 	memcpy (l->color, color, sizeof(float)*4);
 
 	l->gl_draw = positional_light_gl_draw;
@@ -800,7 +866,7 @@ objectT *create_checkerboard_object (float y, float width, int n) {
 
 	params_to_vector (0, 1, 0, &norm);
 
-    obj = create_object (n * n * 2);    
+    obj = create_object (n * n * 2);
 
 	for (i=0; i<obj->surfaces; i++) {
 		init_surface(TRIANGLE, &obj->surface[i]);
@@ -817,19 +883,19 @@ objectT *create_checkerboard_object (float y, float width, int n) {
 			color[0] = 0.8;
 			color[1] = 0.8;
 			color[2] = 0.8;
-			color[3] = 1.0;	
+			color[3] = 1.0;
 			ref = 0.1;
 		} else {
-			color[0] = 0.0;	
-			color[1] = 0.0;	
+			color[0] = 0.0;
+			color[1] = 0.0;
 			color[2] = 0.0;
-			color[3] = 1.0;	
+			color[3] = 1.0;
 			ref = 0.3;
 		}
 
 		x = 2.0*width*((i / (float)(n-1)) - 0.5);
 		z = 2.0*width*((j / (float)(n-1)) - 0.5);
-		
+
         s = &obj->surface[(i*n + j)*2 + 0];
 		params_to_array (x,y,z, &s->parameter[0]);
 		params_to_array (x+w,y,z, &s->parameter[3]);
@@ -859,7 +925,7 @@ float line_of_sight(sceneT *scene, vectorT *a, vectorT *b) {
 
 	rayT	ray;
 	int	i, j;
-  float transparency = 0.0;
+  //float transparency = 0.0;
 
 	ray.origin = *a;
 	diff_vector(b, a, &ray.direction);
@@ -881,7 +947,7 @@ float line_of_sight(sceneT *scene, vectorT *a, vectorT *b) {
 				    (dist_vector(b, &intersection) > 0.001)) {
           if (surf->properties.transparency == 0) return (-1.0);
 
-          transparency += surf->properties.transparency == 0;
+   //       transparency += surf->properties.transparency == 0;
 				}
 			}
 		}
@@ -892,9 +958,9 @@ float line_of_sight(sceneT *scene, vectorT *a, vectorT *b) {
 
 void perturb_vector (vectorT *a, float s, vectorT *p) {
 	// todo: uniform sampling in a cone
-	p->x = a->x + s*(1.0 - 0.5*random() / (float) RAND_MAX);	
-	p->y = a->y + s*(1.0 - 0.5*random() / (float) RAND_MAX);	
-	p->z = a->z + s*(1.0 - 0.5*random() / (float) RAND_MAX);	
+	p->x = a->x + s*(1.0 - 0.5*random() / (float) RAND_MAX);
+	p->y = a->y + s*(1.0 - 0.5*random() / (float) RAND_MAX);
+	p->z = a->z + s*(1.0 - 0.5*random() / (float) RAND_MAX);
 	normalize_vector(p);
 }
 
@@ -905,10 +971,10 @@ void print_pad(int d) {
   }
   printf("|");
 }
-#endif 
+#endif
 
 rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
-  /* 
+  /*
    * This is kinda the important function.
    *
    * Given a ray, find any objects in the scene that are
@@ -935,10 +1001,10 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 #ifdef DEBUG
   print_pad(10 - depth);
   printf ("cast_ray(): \n");
-#endif 
+#endif
 
 	if (depth < 0) {
-    return (ray); 
+    return (ray);
   }
 
   // Find the nearest intersection
@@ -966,7 +1032,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 					found_hit = 1;
 					nearest_distance = distance;
 					nearest_intersection = intersection;
-					surface = surf;		
+					surface = surf;
 				}
 			}
 		}
@@ -1016,7 +1082,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		distance = length_vector(&incidence);
 		normalize_vector(&incidence);
 
-		diffuse = dot_vector(&normal, &incidence); 
+		diffuse = dot_vector(&normal, &incidence);
 
 		reflect_vector(&incidence, &normal, &reflection);
 		specular = dot_vector(&reflection, &ray->direction);
@@ -1027,7 +1093,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		// TODO: put shininess in properties
 		phong = (1.0 - properties.transparency) * diffuse * 0.9f +
 				powf(specular, 35.0f) * properties.reflectance;
-	
+
 		for (j=0; j<4; j++) {
 			ray->color[j] += light_transparency * phong * properties.color[j] * light->color[j] / (1.0 + distance * 0.0001);
 		}
@@ -1041,8 +1107,8 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		int	j, N = 1;
 
 		for (i=0; i<4; i++) reflection_ray.color[i] = 0;
-	
-		// TODO: better mechanism for sampling rather than hard coding stuff	
+
+		// TODO: better mechanism for sampling rather than hard coding stuff
 		if (properties.roughness > 0) N = 1;
 		for (j=0; j<N; j++) {
 			reflection_ray.origin = nearest_intersection;
@@ -1063,8 +1129,8 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		int	j, N = 1;
 
 		for (i=0; i<4; i++) refraction_ray.color[i] = 0;
-	
-		// todo: better mechanism for sampling rather than hard coding stuff	
+
+		// todo: better mechanism for sampling rather than hard coding stuff
 		if (properties.roughness > 0) N = 1;
 		for (j=0; j<N; j++) {
 			char	refracts = 0;
@@ -1073,21 +1139,21 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 
 			// work out whether the incident ray begins inside or outside of the surface
 			vectorT op;
-			
+
 			diff_vector(&nearest_intersection, &ray->origin, &op);
 			if (dot_vector(&op, &rough_normal) < 0) {
 				// outside
-        
-				refraction_ray.refractive_index = properties.refractive_index;
-				refracts = refract_vector(&ray->direction, &rough_normal, 
-								ray->refractive_index, 
+
+				refraction_ray.refractive_index = cauchy_ri(properties.cauchy_a, properties.cauchy_b, ray->wavelength);
+				refracts = refract_vector(&ray->direction, &rough_normal,
+								ray->refractive_index,
 								refraction_ray.refractive_index,
 								&refraction_ray.direction);
 			} else {
 				scale_vector(&rough_normal, -1.0);
 				refraction_ray.refractive_index =1.0;
-				refracts = refract_vector(&ray->direction, &rough_normal, 
-								ray->refractive_index, 
+				refracts = refract_vector(&ray->direction, &rough_normal,
+								ray->refractive_index,
 								refraction_ray.refractive_index,
 								&refraction_ray.direction);
 			}
@@ -1101,13 +1167,13 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 			if (ret) {
 				for (i=0; i<4; i++) ray->color[i] += refraction_ray.color[i] * properties.transparency / (float) N;
 			}
-	
+
 		}
 	}
 
 	// By Metropolis:
-	// - Difussion 
+	// - Difussion
 	// - Scattering
-	
+
 	return (ray);
 }
