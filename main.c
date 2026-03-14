@@ -19,14 +19,14 @@
 #define SCREEN_TEXTURE_ID	1
 
 
-#define SCREEN_WIDTH	  10800
-#define SCREEN_HEIGHT	  10800
+#define SCREEN_WIDTH	  1920
+#define SCREEN_HEIGHT	  1080
 
 #define THREADS       32
 #define MIN_SAMPLES   16
 #define MAX_SAMPLES    1000
-#define QUAL_THRESH   0.001
-#define TRACE_DEPTH   64
+#define QUAL_THRESH   0.1
+#define TRACE_DEPTH   8
 
 #define PI 3.1415926535
 
@@ -116,7 +116,7 @@ char single_ray_trace_to_sensor (sceneT *scene, int width, int height, int x, in
 	X = 2.0*(0.5 - (x / (float) width));
 	Y = 2.0*(0.5 - (y / (float) height));
 
-	ray.origin.x = scene->camera.d * X;
+	ray.origin.x = scene->camera.d * X * (width / (float) height);
 	ray.origin.y = scene->camera.d * Y;
 	ray.origin.z = scene->camera.z;
 

@@ -527,7 +527,7 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	normal.x *= -1.0;
 	normal.y *= -1.0;
 	normal.z *= -1.0;
-	refract_vector(&ray->direction, &normal, lens->refractive_index, 1, &out->direction);
+	refract_vector(&out->direction, &normal, lens->refractive_index, 1, &out->direction);
 
   out->refractive_index = 1.0;
 
@@ -616,29 +616,28 @@ char	ray_triangle_intersection (float *parameter, rayT *ray, vectorT *intersecti
 char	ray_ortho_plane_intersection (float *parameter, rayT *ray, vectorT *intersection) {
 	vectorT normal;
 	vectorT pos;
-	float d;
+	float t;
 
 	array_to_vector(&parameter[0], &normal);
 
 	pos = normal;
 	scale_vector(&pos, parameter[3]);
 
-	d = dot_vector(&normal, &ray->direction);
-
-	if (d >= 0) {	
+	if (dot_vector(&normal, &ray->direction) >= 0) {
 		return (0);
 	}
-	
 	if (normal.x != 0) {
-		d = (pos.x - ray->origin.x) / ray->direction.x;
-	} else 
+		t = (pos.x - ray->origin.x) / ray->direction.x;
+	} else
 	if (normal.y != 0) {
-		d = (pos.y - ray->origin.y) / ray->direction.y;
+		t = (pos.y - ray->origin.y) / ray->direction.y;
 	} else {
-		d = (pos.z - ray->origin.z) / ray->direction.z;
+		t = (pos.z - ray->origin.z) / ray->direction.z;
 	}
 
-	scale_offset_vector(&ray->origin, &ray->direction, d, intersection);
+	if (t < 0.00001) return (0);
+
+	scale_offset_vector(&ray->origin, &ray->direction, t, intersection);
 
 	return (1);
 }
