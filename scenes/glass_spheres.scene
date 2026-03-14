@@ -1,0 +1,28 @@
+# Glass spheres scene (frame 20)
+# Nested transparent spheres with chromatic dispersion
+
+render width=1920 height=1080 min_samples=128 max_samples=1000 qual_thresh=0.1 trace_depth=8
+
+camera z=1.0 d=0.75
+
+# Camera lens
+lens z=0 r1=1.7 r2=3.3082 radius=0.1 cauchy_a=1.0538 cauchy_b=0.06
+
+# Pink center sphere
+sphere pos=-0.3000,0.0,-3.05 radius=0.9 color=0.99,0.58,0.62 roughness=1.0
+
+# Glass shells
+sphere pos=0.0788,0.0,-3.05 radius=1.0400 color=0.5,0.75,0.75 transparency=0.970 cauchy_a=1.1000 cauchy_b=0.04
+sphere pos=0.0401,0.0,-3.05 radius=1.3792 color=0.5,0.75,0.75 transparency=0.945 cauchy_a=1.1869 cauchy_b=0.04
+sphere pos=-0.0122,0.0,-3.05 radius=1.6597 color=0.5,0.75,0.75 transparency=0.920 cauchy_a=1.2739 cauchy_b=0.04
+sphere pos=-0.0760,0.0,-3.05 radius=1.4722 color=0.5,0.75,0.75 transparency=0.895 cauchy_a=1.3608 cauchy_b=0.04
+sphere pos=-0.1486,0.0,-3.05 radius=1.0780 color=0.5,0.75,0.75 transparency=0.870 cauchy_a=1.4477 cauchy_b=0.04
+sphere pos=-0.2274,0.0,-3.05 radius=1.2816 color=0.5,0.75,0.75 transparency=0.845 cauchy_a=1.5347 cauchy_b=0.04
+
+# Background plane
+plane normal=0,0,1 d=-800 color=0.95,0.97,0.96 reflectance=0.2 roughness=0.5
+
+# Lights
+light pos=-1,7,5 intensity=0.8
+light pos=7,-5,4 intensity=0.8
+light pos=-7,-5,1 intensity=0.7
