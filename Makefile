@@ -1,17 +1,20 @@
 INCLUDE = -I/usr/include/
-LIBDIR  = -L/usr/X11R6/lib 
+LIBDIR  = -L/usr/X11R6/lib
 
 COMPILERFLAGS = -Wall -O3 -DOPENGL_DEPRECATED -DGL_SILENCE_DEPRECATION
 CC = gcc
-CFLAGS = $(COMPILERFLAGS) $(INCLUDE) 
+CFLAGS = $(COMPILERFLAGS) $(INCLUDE)
 COMMON_LIBRARIES=
 LINUX_LIBRARIES = -lX11 -lXmu -lGL -lGLU -lm  -lglut
-MAC_LIBRARIES=-framework GLUT -framework OpenGL -framework Cocoa -framework CoreAudio -framework AudioUnit -framework AudioToolbox -framework OpenCL #-lprofiler	
+MAC_LIBRARIES=-framework GLUT -framework OpenGL -framework Cocoa -framework CoreAudio -framework AudioUnit -framework AudioToolbox -framework OpenCL #-lprofiler
 SRC=main.c gl.c tracer.c wireframe.c
 PROG=photon
 FPACK=file_pack/fpack
 
-mac: $(SRC)
+mac: $(SRC) metal_tracer.m tracer.metal
+	$(CC) $(SRC) metal_tracer.m $(CFLAGS) -o $(PROG) -DMAC -DUSE_METAL -fobjc-arc $(COMMON_LIBRARIES) $(MAC_LIBRARIES) -framework Metal -framework Foundation
+
+cpu: $(SRC)
 	$(CC) $(SRC) $(CFLAGS) -o $(PROG) -DMAC $(COMMON_LIBRARIES) $(MAC_LIBRARIES)
 
 dist:
@@ -23,5 +26,4 @@ linux: $(SRC)
 
 clean:
 	rm -f $(PROG)
-
 

@@ -13,6 +13,9 @@
 #include "gl.h"
 #include "tracer.h"
 #include "wireframe.h"
+#ifdef USE_METAL
+#include "metal_tracer.h"
+#endif
 
 #define ESCAPE 27
 
@@ -206,7 +209,8 @@ typedef struct {
   float   *pixels_f;
 } bundle_argsT;
 
-void *ray_trace_bundle_to_pixels (bundle_argsT *args) {
+void *ray_trace_bundle_to_pixels (void *arg) {
+  bundle_argsT *args = (bundle_argsT *) arg;
   /*
    * Ray traces a y-section of the screen. Intended to be run
    * inside a thread. We divide by y to give some semblance of 
@@ -405,7 +409,13 @@ void	render_scene(void)
 	float elapsed;
 
   gettimeofday(&start, NULL);
+#ifdef USE_METAL
+	gpu_ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT,
+		MIN_SAMPLES, MAX_SAMPLES, QUAL_THRESH, TRACE_DEPTH,
+		SCREEN_PIXELS, SCREEN_PIXELS_F);
+#else
 	ray_trace_to_pixels(SCENE, SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_PIXELS, SCREEN_PIXELS_F);
+#endif
 	save_screen(frame, SCREEN_PIXELS, SCREEN_WIDTH, SCREEN_HEIGHT);
 	save_screen_f(frame, SCREEN_PIXELS_F, SCREEN_WIDTH, SCREEN_HEIGHT);
 
@@ -445,6 +455,11 @@ int main(int argc, char **argv)
 {  
 	init_primitives();
 
+#ifdef USE_METAL
+	if (gpu_init() != 0) {
+		fprintf(stderr, "Metal init failed, falling back to CPU\n");
+	}
+#endif
 
 	init_gl (argc, argv);
 
