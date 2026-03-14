@@ -6,6 +6,7 @@ using namespace metal;
 #define GPU_MAX_LIGHTS   8
 #define GPU_MAX_BVH_NODES 64
 #define BVH_STACK_DEPTH  8
+#define GPU_MAX_LENSES   8
 
 struct GPUSurface {
     float cx, cy, cz, radius;
@@ -19,10 +20,15 @@ struct GPULight {
     float color_r, color_g, color_b, color_a;
 };
 
+struct GPULensElement {
+    float z, r1, r2, radius;
+    float cauchy_a, cauchy_b, pad0, pad1;
+};
+
 struct GPUCamera {
-    float lens_z, lens_r1, lens_r2, lens_radius;
-    float lens_cauchy_a, lens_cauchy_b, cam_d, cam_z;
-    float has_lens, pad_c0, pad_c1, pad_c2;
+    float cam_d, cam_z;
+    int num_lenses, pad_cam;
+    GPULensElement lenses[GPU_MAX_LENSES];
 };
 
 struct BVHNode {
@@ -42,7 +48,11 @@ struct GPUScene {
     int num_planes;
     int num_lights;
     int num_bvh_nodes;
+    int shadow_rays;
+    int sample_offset;   // starting sample index for this batch
+    int batch_size;      // number of samples this batch
     float pad0;
+    float spec_norm_r, spec_norm_g, spec_norm_b, pad_sn;
     GPUCamera camera;
     GPUSurface spheres[GPU_MAX_SPHERES];
     GPUSurface planes[GPU_MAX_PLANES];
@@ -134,34 +144,38 @@ bool ray_sphere_intersection(float3 center, float radius,
                              float3 ray_origin, float3 ray_dir,
                              thread float3 &intersection) {
     float3 vpc = center - ray_origin;
-    float vpc_len = length(vpc);
+    float vpc_len_sq = dot(vpc, vpc);
+    float radius_sq = radius * radius;
 
     // Project sphere center onto ray
     float tca = dot(vpc, ray_dir);
-    float3 pc = ray_origin + tca * ray_dir;
 
     if (tca < 0) {
         // Sphere center is behind ray origin
-        if (vpc_len > radius) return false;
-        if (vpc_len <= radius + 0.00001) {
-            float dist_pc_center = distance(pc, center);
-            float half_chord = sqrt(radius * radius - dist_pc_center * dist_pc_center);
-            float d = half_chord - distance(pc, ray_origin);
-            intersection = ray_origin + d * ray_dir;
-            return true;
-        }
-        return false;
+        if (vpc_len_sq > radius_sq) return false;
+        // We're inside the sphere - use squared distance to projected point
+        float3 pc = ray_origin + tca * ray_dir;
+        float3 pc_diff = pc - center;
+        float dist_pc_center_sq = dot(pc_diff, pc_diff);
+        float half_chord = sqrt(radius_sq - dist_pc_center_sq);
+        // tca is negative, distance(pc, ray_origin) = -tca (since ray_dir is unit)
+        float d = half_chord - (-tca);
+        intersection = ray_origin + d * ray_dir;
+        return true;
     } else {
-        float dist_pc_center = distance(pc, center);
-        if (dist_pc_center > radius) return false;
+        // tca >= 0, distance(pc, ray_origin) = tca
+        float3 pc = ray_origin + tca * ray_dir;
+        float3 pc_diff = pc - center;
+        float dist_pc_center_sq = dot(pc_diff, pc_diff);
+        if (dist_pc_center_sq > radius_sq) return false;
 
-        float half_chord = sqrt(radius * radius - dist_pc_center * dist_pc_center);
+        float half_chord = sqrt(radius_sq - dist_pc_center_sq);
         float d;
 
-        if ((vpc_len + 0.00001) >= radius) {
-            d = distance(pc, ray_origin) - half_chord;
+        if (vpc_len_sq + 0.00001 >= radius_sq) {
+            d = tca - half_chord;
         } else {
-            d = distance(pc, ray_origin) + half_chord;
+            d = tca + half_chord;
         }
 
         intersection = ray_origin + d * ray_dir;
@@ -185,141 +199,51 @@ bool ray_aabb_intersection(float3 origin, float3 inv_dir,
 
 // --- BVH traversal for sphere intersection ---
 
-bool bvh_find_nearest_sphere(float3 ray_origin, float3 ray_dir,
-                             constant GPUScene &scene,
-                             thread float &nearest_dist,
-                             thread float3 &hit_point,
-                             thread int &hit_idx) {
-    if (scene.num_bvh_nodes == 0) {
-        // Fallback to linear scan
-        bool found = false;
-        for (int i = 0; i < scene.num_spheres; i++) {
-            float3 center = float3(scene.spheres[i].cx,
-                                   scene.spheres[i].cy,
-                                   scene.spheres[i].cz);
-            float r = scene.spheres[i].radius;
-            float3 isect;
-            if (ray_sphere_intersection(center, r, ray_origin, ray_dir, isect)) {
-                float d = distance(isect, ray_origin);
-                if (d > 0.00001 && d < nearest_dist) {
-                    nearest_dist = d;
-                    hit_point = isect;
-                    hit_idx = i;
-                    found = true;
-                }
-            }
-        }
-        return found;
-    }
-
-    float3 inv_dir = 1.0 / ray_dir;
-    int stack[BVH_STACK_DEPTH];
-    int sp = 0;
-    stack[sp++] = 0;
+bool find_nearest_sphere(float3 ray_origin, float3 ray_dir,
+                         constant GPUScene &scene,
+                         thread float &nearest_dist,
+                         thread float3 &hit_point,
+                         thread int &hit_idx) {
+    // Linear scan - with few spheres this is faster than BVH
+    // and uses far less registers (no stack allocation)
     bool found = false;
-
-    while (sp > 0) {
-        int ni = stack[--sp];
-        constant BVHNode &node = scene.bvh[ni];
-
-        if (!ray_aabb_intersection(ray_origin, inv_dir,
-                float3(node.min_x, node.min_y, node.min_z),
-                float3(node.max_x, node.max_y, node.max_z),
-                nearest_dist))
-            continue;
-
-        if (node.prim_count > 0) {
-            // Leaf
-            for (int i = 0; i < node.prim_count; i++) {
-                int pi = scene.bvh_prim_indices[node.prim_start + i];
-                float3 center = float3(scene.spheres[pi].cx,
-                                       scene.spheres[pi].cy,
-                                       scene.spheres[pi].cz);
-                float r = scene.spheres[pi].radius;
-                float3 isect;
-                if (ray_sphere_intersection(center, r, ray_origin, ray_dir, isect)) {
-                    float d = distance(isect, ray_origin);
-                    if (d > 0.00001 && d < nearest_dist) {
-                        nearest_dist = d;
-                        hit_point = isect;
-                        hit_idx = pi;
-                        found = true;
-                    }
-                }
-            }
-        } else {
-            // Internal node - push children
-            if (sp < BVH_STACK_DEPTH - 1) {
-                stack[sp++] = node.left;
-                stack[sp++] = node.right;
+    for (int i = 0; i < scene.num_spheres; i++) {
+        float3 center = float3(scene.spheres[i].cx,
+                               scene.spheres[i].cy,
+                               scene.spheres[i].cz);
+        float r = scene.spheres[i].radius;
+        float3 isect;
+        if (ray_sphere_intersection(center, r, ray_origin, ray_dir, isect)) {
+            float d = distance(isect, ray_origin);
+            if (d > 0.00001 && d < nearest_dist) {
+                nearest_dist = d;
+                hit_point = isect;
+                hit_idx = i;
+                found = true;
             }
         }
     }
-
     return found;
 }
 
 // --- BVH traversal for shadow rays (any-hit) ---
 
-bool bvh_any_hit_sphere(float3 a, float3 dir, float max_dist,
-                        constant GPUScene &scene) {
-    if (scene.num_bvh_nodes == 0) {
-        for (int i = 0; i < scene.num_spheres; i++) {
-            float3 center = float3(scene.spheres[i].cx,
-                                   scene.spheres[i].cy,
-                                   scene.spheres[i].cz);
-            float r = scene.spheres[i].radius;
-            float3 isect;
-            if (ray_sphere_intersection(center, r, a, dir, isect)) {
-                float da = distance(a, isect);
-                if (da > 0.001 && da < max_dist) {
-                    if (scene.spheres[i].transparency == 0)
-                        return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    float3 inv_dir = 1.0 / dir;
-    int stack[BVH_STACK_DEPTH];
-    int sp = 0;
-    stack[sp++] = 0;
-
-    while (sp > 0) {
-        int ni = stack[--sp];
-        constant BVHNode &node = scene.bvh[ni];
-
-        if (!ray_aabb_intersection(a, inv_dir,
-                float3(node.min_x, node.min_y, node.min_z),
-                float3(node.max_x, node.max_y, node.max_z),
-                max_dist))
-            continue;
-
-        if (node.prim_count > 0) {
-            for (int i = 0; i < node.prim_count; i++) {
-                int pi = scene.bvh_prim_indices[node.prim_start + i];
-                float3 center = float3(scene.spheres[pi].cx,
-                                       scene.spheres[pi].cy,
-                                       scene.spheres[pi].cz);
-                float r = scene.spheres[pi].radius;
-                float3 isect;
-                if (ray_sphere_intersection(center, r, a, dir, isect)) {
-                    float da = distance(a, isect);
-                    if (da > 0.001 && da < max_dist) {
-                        if (scene.spheres[pi].transparency == 0)
-                            return true;
-                    }
-                }
-            }
-        } else {
-            if (sp < BVH_STACK_DEPTH - 1) {
-                stack[sp++] = node.left;
-                stack[sp++] = node.right;
+bool any_hit_sphere(float3 a, float3 dir, float max_dist,
+                    constant GPUScene &scene) {
+    for (int i = 0; i < scene.num_spheres; i++) {
+        float3 center = float3(scene.spheres[i].cx,
+                               scene.spheres[i].cy,
+                               scene.spheres[i].cz);
+        float r = scene.spheres[i].radius;
+        float3 isect;
+        if (ray_sphere_intersection(center, r, a, dir, isect)) {
+            float da = distance(a, isect);
+            if (da > 0.001 && da < max_dist) {
+                if (scene.spheres[i].transparency == 0)
+                    return true;
             }
         }
     }
-
     return false;
 }
 
@@ -355,7 +279,7 @@ bool line_of_sight(float3 a, float3 b,
     float max_dist = distance(a, b) - 0.001;
 
     // BVH-accelerated sphere test
-    if (bvh_any_hit_sphere(a, dir, max_dist, scene))
+    if (any_hit_sphere(a, dir, max_dist, scene))
         return false;
 
     // Planes (linear scan - typically 1-2)
@@ -374,57 +298,143 @@ bool line_of_sight(float3 a, float3 b,
     return true;
 }
 
-// --- Lens refraction ---
+// --- Fresnel reflectance (Schlick approximation) ---
 
-bool ray_through_lens(float3 ray_origin, float3 ray_dir,
-                      constant GPUCamera &cam, float wavelength,
-                      thread float3 &out_origin, thread float3 &out_dir) {
-    float z = cam.lens_z;
-    float r1 = cam.lens_r1;
-    float r2 = cam.lens_r2;
-    float R = cam.lens_radius;
-    float ri = cauchy_ri(cam.lens_cauchy_a, cam.lens_cauchy_b, wavelength);
+float fresnel_schlick(float cosine, float n1, float n2) {
+    float r0 = (n1 - n2) / (n1 + n2);
+    r0 = r0 * r0;
+    float c = 1.0 - cosine;
+    return r0 + (1.0 - r0) * c * c * c * c * c;
+}
 
-    if (ray_origin.z < z) return false;
-    if (ray_dir.z > 0) return false;
+// --- Multi-element lens system with Fresnel reflection ---
+// Each element has a front surface (convex toward +z) and back surface.
+// Rays can reflect at any surface, bouncing inside the lens system.
+// This creates lens flares / ghost images from internal reflections.
 
-    // Front surface
-    float3 front_center = float3(0, 0, z - sqrt(r1 * r1 - R * R));
-    float3 isect;
+#define LENS_MAX_BOUNCES 16
 
-    if (!ray_sphere_intersection(front_center, r1, ray_origin, ray_dir, isect))
-        return false;
+bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
+                             constant GPUCamera &cam, float wavelength,
+                             thread float3 &out_origin, thread float3 &out_dir,
+                             thread RNG &rng, thread bool &hit_dispersive) {
+    if (cam.num_lenses <= 0) return false;
 
-    // Check cap
-    if (sqrt(isect.x * isect.x + isect.y * isect.y) > R)
-        return false;
+    float3 pos = ray_origin;
+    float3 dir = ray_dir;
+    float current_ri = 1.0;  // start in air
 
-    // Refract into lens
-    float3 normal = normalize(isect - front_center);
-    float eta_in = 1.0 / ri;
-    float3 refracted = refract(ray_dir, normal, eta_in);
-    if (length(refracted) < 0.001) return false;
+    // Build surface list: each element contributes 2 surfaces (front, back)
+    // Surfaces are ordered by z position (front surfaces face +z, back surfaces face -z)
+    // We trace from +z toward -z (sensor toward scene)
 
-    out_origin = isect;
-    out_dir = refracted;
+    for (int bounce = 0; bounce < LENS_MAX_BOUNCES; bounce++) {
+        // Find nearest lens surface intersection
+        float nearest_t = 1e30;
+        float3 nearest_isect;
+        float3 nearest_normal;
+        int nearest_elem = -1;
+        int nearest_face = -1;  // 0=front, 1=back
+        float nearest_ri = 1.0;
 
-    // Back surface
-    float3 back_center = float3(0, 0, z + sqrt(r2 * r2 - R * R));
+        for (int e = 0; e < cam.num_lenses; e++) {
+            constant GPULensElement &elem = cam.lenses[e];
+            float z = elem.z;
+            float r1 = elem.r1;
+            float r2 = elem.r2;
+            float R = elem.radius;
 
-    if (!ray_sphere_intersection(back_center, r2, out_origin, out_dir, isect))
-        return false;
+            // Front surface: sphere center behind lens
+            float3 front_center = float3(0, 0, z - sqrt(r1 * r1 - R * R));
+            float3 isect;
+            if (ray_sphere_intersection(front_center, r1, pos, dir, isect)) {
+                float xy_r = sqrt(isect.x * isect.x + isect.y * isect.y);
+                if (xy_r <= R) {
+                    float t = distance(isect, pos);
+                    if (t > 0.0001 && t < nearest_t) {
+                        nearest_t = t;
+                        nearest_isect = isect;
+                        nearest_normal = normalize(isect - front_center);
+                        nearest_elem = e;
+                        nearest_face = 0;
+                        nearest_ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
+                    }
+                }
+            }
 
-    normal = normalize(isect - back_center);
-    normal = -normal; // flip for exit surface
+            // Back surface: sphere center ahead of lens
+            float3 back_center = float3(0, 0, z + sqrt(r2 * r2 - R * R));
+            if (ray_sphere_intersection(back_center, r2, pos, dir, isect)) {
+                float xy_r = sqrt(isect.x * isect.x + isect.y * isect.y);
+                if (xy_r <= R) {
+                    float t = distance(isect, pos);
+                    if (t > 0.0001 && t < nearest_t) {
+                        nearest_t = t;
+                        nearest_isect = isect;
+                        // Back surface normal points away from center, flip to face ray
+                        nearest_normal = -normalize(isect - back_center);
+                        nearest_elem = e;
+                        nearest_face = 1;
+                        nearest_ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
+                    }
+                }
+            }
+        }
 
-    float eta_out = ri / 1.0;
-    refracted = refract(out_dir, normal, eta_out);
-    if (length(refracted) < 0.001) return false;
+        if (nearest_elem < 0) {
+            // No more surfaces hit — ray exits the lens system
+            // Check ray is heading toward scene (-z direction)
+            if (dir.z < 0) {
+                out_origin = pos;
+                out_dir = dir;
+                return true;
+            }
+            return false;  // ray going backward toward sensor
+        }
 
-    out_origin = isect;
-    out_dir = refracted;
+        // Determine transition: entering or exiting glass?
+        float cos_i = abs(dot(dir, nearest_normal));
+        float n1 = current_ri;
+        float n2;
 
-    return true;
+        // If entering glass (from air side), go to glass RI; if exiting, go to air
+        bool entering = (dot(dir, nearest_normal) < 0);
+        if (entering) {
+            n2 = nearest_ri;
+        } else {
+            n2 = 1.0;  // exiting to air
+        }
+
+        if (cam.lenses[nearest_elem].cauchy_b > 0.0001)
+            hit_dispersive = true;
+
+        // Fresnel reflection probability
+        float fresnel_r = fresnel_schlick(cos_i, n1, n2);
+
+        // Probabilistic reflect vs refract
+        if (rng.uniform() < fresnel_r) {
+            // Reflect
+            float3 n = entering ? nearest_normal : -nearest_normal;
+            dir = normalize(dir - 2.0 * dot(dir, n) * n);
+            pos = nearest_isect;
+        } else {
+            // Refract
+            float3 n = entering ? nearest_normal : -nearest_normal;
+            float eta = n1 / n2;
+            float3 refracted = refract(dir, n, eta);
+            if (length(refracted) < 0.001) {
+                // Total internal reflection
+                dir = normalize(dir - 2.0 * dot(dir, n) * n);
+                pos = nearest_isect;
+            } else {
+                dir = refracted;
+                pos = nearest_isect;
+                current_ri = n2;
+            }
+        }
+    }
+
+    return false;  // exceeded max bounces
 }
 
 // --- Perturb normal for roughness (matches CPU bias) ---
@@ -439,9 +449,11 @@ float3 perturb_normal(float3 n, float roughness, thread RNG &rng) {
 // --- Iterative path tracer ---
 
 float3 trace_ray(float3 origin, float3 direction,
-                 constant GPUScene &scene, thread RNG &rng, float wavelength) {
+                 constant GPUScene &scene, thread RNG &rng, float wavelength,
+                 thread int &out_bounces, thread bool &hit_dispersive) {
     float3 accumulated = float3(0);
     float3 throughput = float3(1);
+    hit_dispersive = false;
 
     float3 ray_origin = origin;
     float3 ray_dir = direction;
@@ -458,7 +470,7 @@ float3 trace_ray(float3 origin, float3 direction,
         {
             float3 sp;
             int si;
-            if (bvh_find_nearest_sphere(ray_origin, ray_dir, scene,
+            if (find_nearest_sphere(ray_origin, ray_dir, scene,
                                         nearest_dist, sp, si)) {
                 hit_point = sp;
                 hit_type = 0;
@@ -497,41 +509,56 @@ float3 trace_ray(float3 origin, float3 direction,
 
         float4 color = float4(surf.color_r, surf.color_g, surf.color_b, surf.color_a);
 
-        // Direct lighting
-        for (int i = 0; i < scene.num_lights; i++) {
-            float3 light_pos = float3(scene.lights[i].px,
-                                      scene.lights[i].py,
-                                      scene.lights[i].pz);
-            float4 light_color = float4(scene.lights[i].color_r,
-                                        scene.lights[i].color_g,
-                                        scene.lights[i].color_b,
-                                        scene.lights[i].color_a);
+        // Direct lighting - skip when max contribution is negligible
+        float max_phong = (1.0 - surf.transparency) * 0.9 + surf.reflectance;
+        if (max_phong > 0.01) {
+            for (int i = 0; i < scene.num_lights; i++) {
+                float3 light_pos = float3(scene.lights[i].px,
+                                          scene.lights[i].py,
+                                          scene.lights[i].pz);
+                float4 light_color = float4(scene.lights[i].color_r,
+                                            scene.lights[i].color_g,
+                                            scene.lights[i].color_b,
+                                            scene.lights[i].color_a);
 
-            if (!line_of_sight(hit_point, light_pos, scene)) continue;
+                // Shadow ray visibility test (optional)
+                if (scene.shadow_rays) {
+                    if (!line_of_sight(hit_point, light_pos, scene)) continue;
+                }
 
-            float3 incidence = light_pos - hit_point;
-            float light_dist = length(incidence);
-            incidence = normalize(incidence);
+                float3 incidence = light_pos - hit_point;
+                float light_dist = length(incidence);
+                incidence = normalize(incidence);
 
-            float diffuse = dot(normal, incidence);
-            if (diffuse < 0) diffuse = 0;
+                float diffuse = dot(normal, incidence);
+                if (diffuse < 0) diffuse = 0;
 
-            // Reflect incidence about normal (same as CPU reflect_vector)
-            float3 refl_dir = normalize(incidence - 2.0 * dot(incidence, normal) * normal);
-            float specular = dot(refl_dir, ray_dir);
-            if (specular < 0) specular = 0;
+                // Reflect incidence about normal (same as CPU reflect_vector)
+                float3 refl_dir = normalize(incidence - 2.0 * dot(incidence, normal) * normal);
+                float specular = dot(refl_dir, ray_dir);
+                if (specular < 0) specular = 0;
 
-            float phong = (1.0 - surf.transparency) * diffuse * 0.9 +
-                          pow(specular, 35.0) * surf.reflectance;
+                float phong = (1.0 - surf.transparency) * diffuse * 0.9 +
+                              pow(specular, 35.0) * surf.reflectance;
 
-            accumulated += throughput * phong * color.rgb *
-                          float3(light_color.r, light_color.g, light_color.b) /
-                          (1.0 + light_dist * 0.0001);
+                accumulated += throughput * phong * color.rgb *
+                              float3(light_color.r, light_color.g, light_color.b) /
+                              (1.0 + light_dist * 0.0001);
+            }
         }
 
         // Choose next bounce: reflection or refraction
         float total_bounce = surf.reflectance + surf.transparency;
         if (total_bounce < 0.001) break;
+
+        // Russian roulette: unbiased early termination for low-throughput paths
+        // Start after typical glass traversal depth to preserve caustic quality
+        if (depth > 16) {
+            float max_t = max(throughput.r, max(throughput.g, throughput.b));
+            float survive = min(max_t, 0.95f);
+            if (rng.uniform() > survive) break;
+            throughput /= survive;
+        }
 
         float3 rough_normal = normal;
         if (surf.roughness > 0)
@@ -551,6 +578,7 @@ float3 trace_ray(float3 origin, float3 direction,
             if (dot(op, rough_normal) < 0) {
                 // Outside surface
                 float surf_ri = cauchy_ri(surf.cauchy_a, surf.cauchy_b, wavelength);
+                if (surf.cauchy_b > 0.0001) hit_dispersive = true;
                 float eta = ray_ri / surf_ri;
                 refracted = refract(ray_dir, rough_normal, eta);
                 if (length(refracted) > 0.001) {
@@ -575,6 +603,7 @@ float3 trace_ray(float3 origin, float3 direction,
         }
 
         ray_origin = hit_point;
+        out_bounces = depth + 1;
     }
 
     return accumulated;
@@ -582,9 +611,13 @@ float3 trace_ray(float3 origin, float3 direction,
 
 // --- Main kernel ---
 
+// Accumulation buffer layout per pixel: [R_sum, G_sum, B_sum, num_samples, running_mean, M2]
+#define ACCUM_STRIDE 6
+
 kernel void trace_kernel(
     constant GPUScene &scene [[buffer(0)]],
     device float *output [[buffer(1)]],
+    device float *accum [[buffer(2)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
     int x = gid.x;
@@ -595,7 +628,35 @@ kernel void trace_kernel(
     if (x >= width || y >= height) return;
 
     uint pixel_idx = y * width + x;
-    RNG rng(scene.frame_seed ^ pixel_idx * 1973u ^ uint(x) * 9277u ^ uint(y) * 6581u);
+
+    // Load accumulated state
+    int aidx = pixel_idx * ACCUM_STRIDE;
+    float R = accum[aidx + 0];
+    float G = accum[aidx + 1];
+    float B = accum[aidx + 2];
+    int prev_samples = int(accum[aidx + 3]);
+    float running_mean = accum[aidx + 4];
+    float M2 = accum[aidx + 5]; // sum of squared differences (Welford)
+
+    // Already converged from previous batch?
+    if (prev_samples >= scene.max_samples) return;
+    if (prev_samples >= scene.min_samples) {
+        // Standard error of the mean (noise in the averaged pixel value)
+        float variance = M2 / float(prev_samples);
+        float std_error = sqrt(variance / float(prev_samples));
+        float rel_error = std_error / max(running_mean, 0.0001f);
+        if (rel_error < scene.qual_thresh) return;
+    }
+
+    // Fixed per-pixel RNG for Cranley-Patterson rotation offsets (stable across batches)
+    RNG pixel_rng(scene.frame_seed ^ pixel_idx * 1973u ^ uint(x) * 9277u ^ uint(y) * 6581u);
+    float pixel_rand_w = pixel_rng.uniform();  // wavelength offset
+    float pixel_rand_a = pixel_rng.uniform();  // aperture angle offset
+    float pixel_rand_b = pixel_rng.uniform();  // aperture radius offset
+
+    // Seed RNG incorporating sample_offset so each batch gets different random state
+    RNG rng(scene.frame_seed ^ pixel_idx * 1973u ^ uint(x) * 9277u ^ uint(y) * 6581u
+            ^ uint(scene.sample_offset) * 104729u);
 
     float X = 2.0 * (0.5 - (float(x) / float(width)));
     float Y = 2.0 * (0.5 - (float(y) / float(height)));
@@ -607,70 +668,94 @@ kernel void trace_kernel(
         scene.camera.cam_z
     );
 
-    float3 spec_norm = compute_spectral_norm();
-    float R = 0, G = 0, B = 0;
-    float running_mean = 0;
-    float last_check_mean = 0;
-    int num_samples = 0;
+    float3 spec_norm = float3(scene.spec_norm_r, scene.spec_norm_g, scene.spec_norm_b);
 
-    for (int s = 0; s < scene.max_samples; s++) {
-        // Sample a random wavelength for this ray
-        float wavelength = 380.0 + 400.0 * rng.uniform();
+    int batch_count = min(scene.batch_size, scene.max_samples - prev_samples);
+    if (batch_count <= 0) return;
+    int num_samples = prev_samples;
 
-        // DOF: sample point on lens
-        float angle = 2.0 * M_PI_F * rng.uniform();
-        float rad = 0.05 * rng.uniform();
-        float3 lens_point = float3(
-            rad * cos(angle),
-            rad * sin(angle),
-            scene.camera.lens_z
-        );
+    for (int i = 0; i < batch_count; i++) {
+        // Low-discrepancy wavelength sampling (golden ratio + Cranley-Patterson rotation)
+        float wavelength = 380.0 + 400.0 * fract(float(num_samples) * 0.6180339887 + pixel_rand_w);
 
-        float3 ray_dir = normalize(lens_point - sensor_origin);
         float3 cam_origin, cam_dir;
+        bool dispersive = false;
 
-        if (scene.camera.has_lens > 0.5) {
-            if (!ray_through_lens(sensor_origin, ray_dir, scene.camera,
-                                  wavelength, cam_origin, cam_dir)) {
+        if (scene.camera.num_lenses > 0) {
+            // DOF: stratified lens sampling on first element's aperture
+            constant GPULensElement &front = scene.camera.lenses[0];
+            float angle = 2.0 * M_PI_F * fract(float(num_samples) * 0.7548776662 + pixel_rand_a);
+            float rad = front.radius * sqrt(fract(float(num_samples) * 0.3247179572 + pixel_rand_b));
+            float3 lens_point = float3(
+                rad * cos(angle),
+                rad * sin(angle),
+                front.z
+            );
+
+            float3 ray_dir = normalize(lens_point - sensor_origin);
+
+            if (!ray_through_lens_system(sensor_origin, ray_dir, scene.camera,
+                                         wavelength, cam_origin, cam_dir,
+                                         rng, dispersive)) {
                 continue;
             }
         } else {
             cam_origin = sensor_origin;
-            cam_dir = ray_dir;
+            cam_dir = normalize(float3(0, 0, 0) - sensor_origin);
         }
 
-        float3 color = trace_ray(cam_origin, cam_dir, scene, rng, wavelength);
+        int bounces = 0;
+        float3 color = trace_ray(cam_origin, cam_dir, scene, rng, wavelength,
+                                 bounces, dispersive);
 
-        // Spectral weighting: each wavelength sees the surface color
-        // through its spectral band (preserves surface colors)
-        color *= wavelength_to_rgb(wavelength, spec_norm);
+        // Spectral weighting: only apply when ray hit dispersive material
+        // Non-dispersive paths use white light to avoid colored noise
+        if (dispersive)
+            color *= wavelength_to_rgb(wavelength, spec_norm);
 
-        // Cosine weighting (matches CPU sensor_normal = (0,0,-1))
+        // Cosine weighting
         float cosine = 0.5 + 0.5 * (-cam_dir.z);
         color *= cosine;
+
+        // Clamp fireflies: cap per-sample luminance to prevent spectral outliers
+        float lum_check = color.r + color.g + color.b;
+        if (lum_check > 30.0) color *= 30.0 / lum_check;
 
         R += color.r;
         G += color.g;
         B += color.b;
-        num_samples = s + 1;
+        num_samples++;
 
-        // Adaptive convergence
+        // Adaptive convergence (Welford's online variance)
         float lum = color.r + color.g + color.b;
-        if (s == 0) {
+        float old_mean = running_mean;
+        if (num_samples == 1) {
             running_mean = lum;
+            M2 = 0;
         } else {
-            running_mean += (lum - running_mean) / float(s + 1);
+            running_mean += (lum - running_mean) / float(num_samples);
+            M2 += (lum - old_mean) * (lum - running_mean);
         }
 
-        if (s > scene.min_samples && (s % scene.min_samples == 0)) {
-            float score = abs(running_mean - last_check_mean) / max(running_mean, 0.0001f);
-            if (score < scene.qual_thresh) break;
-            last_check_mean = running_mean;
+        if (num_samples >= scene.min_samples && (num_samples % 16 == 0)) {
+            float variance = M2 / float(num_samples);
+            float std_error = sqrt(variance / float(num_samples));
+            float rel_error = std_error / max(running_mean, 0.0001f);
+            if (rel_error < scene.qual_thresh) break;
         }
     }
 
-    if (num_samples == 0) num_samples = 1;
-    float inv_n = 1.0 / float(num_samples);
+    // Save accumulated state
+    accum[aidx + 0] = R;
+    accum[aidx + 1] = G;
+    accum[aidx + 2] = B;
+    accum[aidx + 3] = float(num_samples);
+    accum[aidx + 4] = running_mean;
+    accum[aidx + 5] = M2;
+
+    // Write current best output (averaged)
+    int n = max(num_samples, 1);
+    float inv_n = 1.0 / float(n);
     int idx = pixel_idx * 3;
     output[idx + 0] = R * inv_n;
     output[idx + 1] = G * inv_n;

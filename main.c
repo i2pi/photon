@@ -105,6 +105,7 @@ void	render_scene(void)
 #ifdef USE_METAL
 	gpu_ray_trace_to_pixels(SCENE, RENDER.width, RENDER.height,
 		RENDER.min_samples, RENDER.max_samples, RENDER.qual_thresh, RENDER.trace_depth,
+		RENDER.shadow_rays,
 		SCREEN_PIXELS, SCREEN_PIXELS_F);
 #else
 	ray_trace_to_pixels(SCENE, RENDER.width, RENDER.height,

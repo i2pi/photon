@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #include <math.h>
 #include <string.h>
+#include <sys/time.h>
 #include "metal_tracer.h"
 
 // --- GPU struct definitions (must match tracer.metal exactly) ---
@@ -10,6 +11,7 @@
 #define GPU_MAX_PLANES   8
 #define GPU_MAX_LIGHTS   8
 #define GPU_MAX_BVH_NODES 64
+#define GPU_MAX_LENSES   8
 
 typedef struct {
     float cx, cy, cz, radius;
@@ -24,9 +26,14 @@ typedef struct {
 } GPULight;
 
 typedef struct {
-    float lens_z, lens_r1, lens_r2, lens_radius;
-    float lens_cauchy_a, lens_cauchy_b, cam_d, cam_z;
-    float has_lens, pad_c0, pad_c1, pad_c2;
+    float z, r1, r2, radius;
+    float cauchy_a, cauchy_b, pad0, pad1;
+} GPULensElement;
+
+typedef struct {
+    float cam_d, cam_z;
+    int num_lenses, pad_cam;
+    GPULensElement lenses[GPU_MAX_LENSES];
 } GPUCamera;
 
 typedef struct {
@@ -46,7 +53,11 @@ typedef struct {
     int num_planes;
     int num_lights;
     int num_bvh_nodes;
+    int shadow_rays;
+    int sample_offset;
+    int batch_size;
     float pad0;
+    float spec_norm_r, spec_norm_g, spec_norm_b, pad_sn;
     GPUCamera camera;
     GPUSurface spheres[GPU_MAX_SPHERES];
     GPUSurface planes[GPU_MAX_PLANES];
@@ -223,6 +234,7 @@ static float gpu_gamma(float x) {
 void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
                              int min_samples, int max_samples,
                              float qual_thresh, int trace_depth,
+                             int shadow_rays,
                              char *pixels, float *pixels_f) {
     if (!gpu_ready) {
         fprintf(stderr, "Metal: not initialized\n");
@@ -240,7 +252,32 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
         gpu_scene.max_samples = max_samples;
         gpu_scene.qual_thresh = qual_thresh;
         gpu_scene.trace_depth = trace_depth;
+        gpu_scene.shadow_rays = shadow_rays;
         gpu_scene.frame_seed = arc4random();
+
+        // Precompute spectral normalization (same as GPU compute_spectral_norm)
+        {
+            float rs = 0, gs = 0, bs = 0;
+            int N = 1000;
+            for (int i = 0; i < N; i++) {
+                float wl = 380.0f + 400.0f * i / (float)N;
+                float r = 0, g = 0, b = 0;
+                if (wl >= 380 && wl < 440) { r = -(wl-440)/(440-380); b = 1; }
+                else if (wl < 490) { g = (wl-440)/(490-440); b = 1; }
+                else if (wl < 510) { g = 1; b = -(wl-510)/(510-490); }
+                else if (wl < 580) { r = (wl-510)/(580-510); g = 1; }
+                else if (wl < 645) { r = 1; g = -(wl-645)/(645-580); }
+                else if (wl <= 780) { r = 1; }
+                float t;
+                if (wl >= 380 && wl < 420) t = 0.3f + 0.7f*(wl-380)/(420-380);
+                else if (wl >= 700) t = 0.3f + 0.7f*(780-wl)/(780-700);
+                else t = 1.0f;
+                rs += r*t; gs += g*t; bs += b*t;
+            }
+            gpu_scene.spec_norm_r = (float)N / rs;
+            gpu_scene.spec_norm_g = (float)N / gs;
+            gpu_scene.spec_norm_b = (float)N / bs;
+        }
 
         // Camera
         gpu_scene.camera.cam_d = scene->camera.d;
@@ -309,37 +346,59 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
 
         // Create buffers
         size_t output_size = sizeof(float) * width * height * 3;
-
-        id<MTLBuffer> scene_buf = [mtl_device newBufferWithBytes:&gpu_scene
-                                                          length:sizeof(GPUScene)
-                                                         options:MTLResourceStorageModeShared];
+        size_t accum_size = sizeof(float) * width * height * 6; // R,G,B,count,running_mean,last_check_mean
 
         id<MTLBuffer> output_buf = [mtl_device newBufferWithLength:output_size
                                                            options:MTLResourceStorageModeShared];
 
-        // Dispatch
-        id<MTLCommandBuffer> cmd = [mtl_queue commandBuffer];
-        id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
-
-        [enc setComputePipelineState:mtl_pipeline];
-        [enc setBuffer:scene_buf offset:0 atIndex:0];
-        [enc setBuffer:output_buf offset:0 atIndex:1];
+        id<MTLBuffer> accum_buf = [mtl_device newBufferWithLength:accum_size
+                                                          options:MTLResourceStorageModeShared];
+        // Zero accumulation buffer
+        memset([accum_buf contents], 0, accum_size);
 
         MTLSize grid = MTLSizeMake(width, height, 1);
         NSUInteger w = [mtl_pipeline threadExecutionWidth];
         NSUInteger h = [mtl_pipeline maxTotalThreadsPerThreadgroup] / w;
         MTLSize group = MTLSizeMake(w, h, 1);
 
-        [enc dispatchThreads:grid threadsPerThreadgroup:group];
-        [enc endEncoding];
+        // Dispatch in batches to avoid GPU watchdog timeout
+        int batch = 4;
+        struct timeval batch_start, batch_end;
+        for (int offset = 0; offset < max_samples; offset += batch) {
+            gpu_scene.sample_offset = offset;
+            gpu_scene.batch_size = batch;
 
-        [cmd commit];
-        [cmd waitUntilCompleted];
+            id<MTLBuffer> scene_buf = [mtl_device newBufferWithBytes:&gpu_scene
+                                                              length:sizeof(GPUScene)
+                                                             options:MTLResourceStorageModeShared];
 
-        if ([cmd error]) {
-            fprintf(stderr, "Metal: execution error: %s\n",
-                    [[[cmd error] localizedDescription] UTF8String]);
-            return;
+            id<MTLCommandBuffer> cmd = [mtl_queue commandBuffer];
+            id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
+
+            [enc setComputePipelineState:mtl_pipeline];
+            [enc setBuffer:scene_buf offset:0 atIndex:0];
+            [enc setBuffer:output_buf offset:0 atIndex:1];
+            [enc setBuffer:accum_buf offset:0 atIndex:2];
+
+            [enc dispatchThreads:grid threadsPerThreadgroup:group];
+            [enc endEncoding];
+
+            gettimeofday(&batch_start, NULL);
+            [cmd commit];
+            [cmd waitUntilCompleted];
+            gettimeofday(&batch_end, NULL);
+
+            float batch_ms = ((batch_end.tv_sec - batch_start.tv_sec) * 1000.0f +
+                             (batch_end.tv_usec - batch_start.tv_usec) / 1000.0f);
+            fprintf(stderr, "  batch %2d (samples %4d-%4d): %.1fms\n",
+                    offset / batch, offset, offset + batch - 1, batch_ms);
+
+            if ([cmd error]) {
+                fprintf(stderr, "  Metal: GPU warning batch %d (code %ld): %s\n",
+                        offset / batch,
+                        (long)[[cmd error] code],
+                        [[[cmd error] localizedDescription] UTF8String]);
+            }
         }
 
         // Read back and convert
@@ -354,6 +413,50 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             pixels[idx + 0] = (char)(gpu_gamma(gpu_output[idx + 0]) * 255);
             pixels[idx + 1] = (char)(gpu_gamma(gpu_output[idx + 1]) * 255);
             pixels[idx + 2] = (char)(gpu_gamma(gpu_output[idx + 2]) * 255);
+        }
+
+        // Diagnostic analysis from accumulation buffer
+        float *ac = (float *)[accum_buf contents];
+        float total_samples = 0;
+        float min_samples_px = 1e30, max_samples_px = 0;
+        int num_pixels = width * height;
+        int hist[5] = {0, 0, 0, 0, 0};
+
+        for (int i = 0; i < num_pixels; i++) {
+            float s = ac[i * 6 + 3];
+            total_samples += s;
+            if (s < min_samples_px) min_samples_px = s;
+            if (s > max_samples_px) max_samples_px = s;
+
+            if (s <= 128) hist[0]++;
+            else if (s <= 256) hist[1]++;
+            else if (s <= 512) hist[2]++;
+            else if (s <= 768) hist[3]++;
+            else hist[4]++;
+        }
+
+        fprintf(stderr, "\n--- GPU Diagnostics ---\n");
+        fprintf(stderr, "Samples/pixel:  avg=%.0f  min=%.0f  max=%.0f\n",
+                total_samples / num_pixels, min_samples_px, max_samples_px);
+        fprintf(stderr, "Sample histogram: [0-128]=%d  [129-256]=%d  [257-512]=%d  [513-768]=%d  [769+]=%d\n",
+                hist[0], hist[1], hist[2], hist[3], hist[4]);
+        fprintf(stderr, "Total rays: %.0fM  Batches: %d\n",
+                total_samples / 1e6, (max_samples + batch - 1) / batch);
+
+        // Check variance values at a few pixels
+        for (int py = height/2; py <= height/2; py++) {
+            for (int px = width/4; px <= 3*width/4; px += width/4) {
+                int pi = py * width + px;
+                int ai = pi * 6;
+                float n = ac[ai + 3];
+                float mean = ac[ai + 4];
+                float m2 = ac[ai + 5];
+                float var = (n > 0) ? m2 / n : 0;
+                float se = (n > 1) ? sqrtf(var / n) : 0;
+                float rel = se / fmaxf(mean, 0.0001f);
+                fprintf(stderr, "  pixel(%d,%d): n=%.0f mean=%.4f var=%.4f se=%.6f rel_err=%.4f\n",
+                        px, py, n, mean, var, se, rel);
+            }
         }
     }
 }

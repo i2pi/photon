@@ -8,6 +8,7 @@ typedef struct {
 	int		min_samples, max_samples;
 	float	qual_thresh;
 	int		trace_depth;
+	int		shadow_rays;
 } render_settingsT;
 
 sceneT *load_scene(const char *filename, render_settingsT *settings);
