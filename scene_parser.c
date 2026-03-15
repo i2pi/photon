@@ -113,6 +113,10 @@ sceneT *load_scene(const char *filename, render_settingsT *settings) {
 			s->camera.z = get_kv_float(tokens, n, "z", s->camera.z);
 			s->camera.d = get_kv_float(tokens, n, "d", s->camera.d);
 
+		} else if (strcmp(cmd, "aperture") == 0) {
+			s->camera.aperture_z = get_kv_float(tokens, n, "z", 0);
+			s->camera.aperture_radius = get_kv_float(tokens, n, "radius", 0.1);
+
 		} else if (strcmp(cmd, "lens") == 0) {
 			float z  = get_kv_float(tokens, n, "z", 0);
 			float r1 = get_kv_float(tokens, n, "r1", 1);
@@ -120,7 +124,8 @@ sceneT *load_scene(const char *filename, render_settingsT *settings) {
 			float r  = get_kv_float(tokens, n, "radius", 0.1);
 			float ca = get_kv_float(tokens, n, "cauchy_a", 1.5);
 			float cb = get_kv_float(tokens, n, "cauchy_b", 0.0);
-			add_lens_to_camera(&s->camera, z, r1, r2, r, ca, cb);
+			float refl = get_kv_float(tokens, n, "reflectance", 0.0);
+			add_lens_to_camera(&s->camera, z, r1, r2, r, ca, cb, refl);
 			add_object_to_scene(s, s->camera.lens[s->camera.lenses - 1].object);
 
 		} else if (strcmp(cmd, "sphere") == 0) {
@@ -139,8 +144,12 @@ sceneT *load_scene(const char *filename, render_settingsT *settings) {
 			float ca    = get_kv_float(tokens, n, "cauchy_a", 1.0);
 			float cb    = get_kv_float(tokens, n, "cauchy_b", 0.0);
 
+			float emit = get_kv_float(tokens, n, "emission", 0.0);
+
 			objectT *obj = create_sphere_object(x, y, z, radius);
 			color_object(obj, color, refl, rough, trans, ca, cb);
+			for (int si = 0; si < obj->surfaces; si++)
+				obj->surface[si].properties.emission = emit;
 			add_object_to_scene(s, obj);
 
 		} else if (strcmp(cmd, "plane") == 0) {

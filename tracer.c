@@ -646,7 +646,7 @@ char	cast_ray_through_camera(rayT *ray, cameraT *camera, rayT *out) {
 	return (1);
 }
 
-void add_lens_to_camera (cameraT *camera, float z, float r1, float r2, float R, float cauchy_a, float cauchy_b) {
+void add_lens_to_camera (cameraT *camera, float z, float r1, float r2, float R, float cauchy_a, float cauchy_b, float reflectance) {
 	int	i;
 
 	i = camera->lenses;
@@ -656,6 +656,7 @@ void add_lens_to_camera (cameraT *camera, float z, float r1, float r2, float R, 
 	camera->lens[i].radius = R;
 	camera->lens[i].cauchy_a = cauchy_a;
 	camera->lens[i].cauchy_b = cauchy_b;
+	camera->lens[i].reflectance = reflectance;
 	camera->lens[i].object = create_lens_object(z, r1, r2, R);
 	camera->lenses++;
 }

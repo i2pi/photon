@@ -17,7 +17,7 @@ typedef struct {
     float cx, cy, cz, radius;
     float color_r, color_g, color_b, color_a;
     float reflectance, roughness, transparency, cauchy_a;
-    float cauchy_b, pad_s1, pad_s2, pad_s3;
+    float cauchy_b, emission, pad_s2, pad_s3;
 } GPUSurface;
 
 typedef struct {
@@ -27,12 +27,13 @@ typedef struct {
 
 typedef struct {
     float z, r1, r2, radius;
-    float cauchy_a, cauchy_b, pad0, pad1;
+    float cauchy_a, cauchy_b, reflectance, pad0;
 } GPULensElement;
 
 typedef struct {
     float cam_d, cam_z;
     int num_lenses, pad_cam;
+    float aperture_z, aperture_radius, pad_a0, pad_a1;
     GPULensElement lenses[GPU_MAX_LENSES];
 } GPUCamera;
 
@@ -154,6 +155,7 @@ static void pack_surface(objectT *obj, int surf_idx, GPUSurface *out) {
     out->transparency = s->properties.transparency;
     out->cauchy_a = s->properties.cauchy_a;
     out->cauchy_b = s->properties.cauchy_b;
+    out->emission = s->properties.emission;
 }
 
 // --- BVH build (top-down median split) ---
@@ -282,16 +284,21 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
         // Camera
         gpu_scene.camera.cam_d = scene->camera.d;
         gpu_scene.camera.cam_z = scene->camera.z;
+        gpu_scene.camera.aperture_z = scene->camera.aperture_z;
+        gpu_scene.camera.aperture_radius = scene->camera.aperture_radius;
+        gpu_scene.camera.num_lenses = scene->camera.lenses;
+        if (gpu_scene.camera.num_lenses > GPU_MAX_LENSES)
+            gpu_scene.camera.num_lenses = GPU_MAX_LENSES;
 
-        if (scene->camera.lenses > 0) {
-            lensT *lens = &scene->camera.lens[0];
-            gpu_scene.camera.lens_z = lens->z;
-            gpu_scene.camera.lens_r1 = lens->r1;
-            gpu_scene.camera.lens_r2 = lens->r2;
-            gpu_scene.camera.lens_radius = lens->radius;
-            gpu_scene.camera.lens_cauchy_a = lens->cauchy_a;
-            gpu_scene.camera.lens_cauchy_b = lens->cauchy_b;
-            gpu_scene.camera.has_lens = 1.0f;
+        for (int i = 0; i < gpu_scene.camera.num_lenses; i++) {
+            lensT *lens = &scene->camera.lens[i];
+            gpu_scene.camera.lenses[i].z = lens->z;
+            gpu_scene.camera.lenses[i].r1 = lens->r1;
+            gpu_scene.camera.lenses[i].r2 = lens->r2;
+            gpu_scene.camera.lenses[i].radius = lens->radius;
+            gpu_scene.camera.lenses[i].cauchy_a = lens->cauchy_a;
+            gpu_scene.camera.lenses[i].cauchy_b = lens->cauchy_b;
+            gpu_scene.camera.lenses[i].reflectance = lens->reflectance;
         }
 
         // Pack objects: separate spheres and planes

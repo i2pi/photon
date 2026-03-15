@@ -36,6 +36,7 @@ typedef struct {
 	float	transparency;
 	float	cauchy_a;		// refractive index: n(λ) = A + B/λ²
 	float	cauchy_b;		// λ in micrometers. B=0 for non-dispersive
+	float	emission;		// emissive intensity (0 = not emissive)
 } surface_propertiesT;
 
 typedef struct surfaceT {
@@ -65,25 +66,25 @@ typedef struct lightT {
 
 typedef struct {
 	// r1 & r2 are the curvature radii for the front & back surfaces.
-	// Front is defined by facing the +ve z direction.
-	// The radius is the radius of the lens :P
-	// Only doing spherical lenses for now.
+	// Positive = convex toward camera, negative = concave.
+	// The radius is the radius of the lens aperture.
 
 	float	z;
 	float	r1, r2;
 	float	cauchy_a, cauchy_b;
 	float	radius;
+	float	reflectance;	// surface reflectance (0=Fresnel only, >0 adds fixed reflection)
 	objectT	*object;
 } lensT;
 
 typedef struct {
 	// Sensor is a d x d square at (0, 0, z)
 	// All elements are perpendicular to the z-axis
-	// Sensor is an d x d square
-	// TODO: Apertures
 
 	float	d;
 	float	z;
+	float	aperture_z;
+	float	aperture_radius;
 	lensT	lens[MAX_LENSES];
 	int		lenses;
 } cameraT;
@@ -116,7 +117,7 @@ sceneT *create_scene (void);
 void    add_object_to_scene (sceneT *s, objectT *o);
 void    add_light_to_scene (sceneT *s, lightT *o);
 void 	add_lens_to_camera (cameraT *camera,
-			float z, float r1, float r2, float R, float cauchy_a, float cauchy_b);
+			float z, float r1, float r2, float R, float cauchy_a, float cauchy_b, float reflectance);
 
 /* 
 ** SURFACE PROPERTIES

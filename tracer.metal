@@ -12,7 +12,7 @@ struct GPUSurface {
     float cx, cy, cz, radius;
     float color_r, color_g, color_b, color_a;
     float reflectance, roughness, transparency, cauchy_a;
-    float cauchy_b, pad_s1, pad_s2, pad_s3;
+    float cauchy_b, emission, pad_s2, pad_s3;
 };
 
 struct GPULight {
@@ -22,12 +22,13 @@ struct GPULight {
 
 struct GPULensElement {
     float z, r1, r2, radius;
-    float cauchy_a, cauchy_b, pad0, pad1;
+    float cauchy_a, cauchy_b, reflectance, pad0;
 };
 
 struct GPUCamera {
     float cam_d, cam_z;
     int num_lenses, pad_cam;
+    float aperture_z, aperture_radius, pad_a0, pad_a1;
     GPULensElement lenses[GPU_MAX_LENSES];
 };
 
@@ -308,11 +309,30 @@ float fresnel_schlick(float cosine, float n1, float n2) {
 }
 
 // --- Multi-element lens system with Fresnel reflection ---
-// Each element has a front surface (convex toward +z) and back surface.
-// Rays can reflect at any surface, bouncing inside the lens system.
-// This creates lens flares / ghost images from internal reflections.
+// Each lens element has two spherical surfaces (front and back).
+// We trace sequentially through surfaces, with Fresnel reflection at each.
+// Reflected rays can bounce between surfaces, creating lens flare ghosts.
 
 #define LENS_MAX_BOUNCES 16
+
+// Find both intersection points with a sphere, return as t values along the ray.
+// Returns count of valid (positive) intersections.
+int ray_sphere_t(float3 center, float radius, float3 origin, float3 dir,
+                 thread float &t0, thread float &t1) {
+    float3 oc = origin - center;
+    float b = dot(oc, dir);
+    float c = dot(oc, oc) - radius * radius;
+    float disc = b * b - c;
+    if (disc < 0) return 0;
+    float sq = sqrt(disc);
+    t0 = -b - sq;
+    t1 = -b + sq;
+    // Return count of valid t values (epsilon to avoid self-intersection)
+    int count = 0;
+    if (t0 > 0.001) count++;
+    if (t1 > 0.001) count++;
+    return count;
+}
 
 bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
                              constant GPUCamera &cam, float wavelength,
@@ -324,102 +344,129 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
     float3 dir = ray_dir;
     float current_ri = 1.0;  // start in air
 
-    // Build surface list: each element contributes 2 surfaces (front, back)
-    // Surfaces are ordered by z position (front surfaces face +z, back surfaces face -z)
-    // We trace from +z toward -z (sensor toward scene)
+    // Compute valid z-range for the lens system to reject far-side sphere hits.
+    // Any intersection z outside [z_min, z_max] is a spurious far-side hit.
+    float z_front = cam.lenses[0].z;
+    float z_back = cam.lenses[cam.num_lenses - 1].z;
+    float z_margin = abs(z_front - z_back) + 0.5;  // generous margin
+    float z_max = max(z_front, z_back) + z_margin;
+    float z_min = min(z_front, z_back) - z_margin;
 
     for (int bounce = 0; bounce < LENS_MAX_BOUNCES; bounce++) {
-        // Find nearest lens surface intersection
+        // Find nearest lens surface intersection across all elements
         float nearest_t = 1e30;
         float3 nearest_isect;
-        float3 nearest_normal;
+        float3 nearest_normal;  // always pointing outward from glass at surface
         int nearest_elem = -1;
-        int nearest_face = -1;  // 0=front, 1=back
         float nearest_ri = 1.0;
+        bool nearest_entering = false;  // entering glass?
 
         for (int e = 0; e < cam.num_lenses; e++) {
             constant GPULensElement &elem = cam.lenses[e];
             float z = elem.z;
-            float r1 = elem.r1;
-            float r2 = elem.r2;
             float R = elem.radius;
+            float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
 
-            // Front surface: sphere center behind lens
-            float3 front_center = float3(0, 0, z - sqrt(r1 * r1 - R * R));
-            float3 isect;
-            if (ray_sphere_intersection(front_center, r1, pos, dir, isect)) {
-                float xy_r = sqrt(isect.x * isect.x + isect.y * isect.y);
-                if (xy_r <= R) {
-                    float t = distance(isect, pos);
-                    if (t > 0.0001 && t < nearest_t) {
-                        nearest_t = t;
-                        nearest_isect = isect;
-                        nearest_normal = normalize(isect - front_center);
-                        nearest_elem = e;
-                        nearest_face = 0;
-                        nearest_ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
-                    }
-                }
+            // Front surface sphere
+            float abs_r1 = abs(elem.r1);
+            float sign1 = (elem.r1 > 0) ? 1.0 : -1.0;
+            float3 fc = float3(0, 0, z - sign1 * sqrt(abs_r1 * abs_r1 - R * R));
+
+            float t0, t1;
+            int hits = ray_sphere_t(fc, abs_r1, pos, dir, t0, t1);
+            // Check both intersections
+            for (int h = 0; h < 2; h++) {
+                float t = (h == 0) ? t0 : t1;
+                if (t <= 0.001 || t >= nearest_t) continue;
+                float3 isect = pos + t * dir;
+                if (isect.z < z_min || isect.z > z_max) continue;  // reject far-side hits
+                float xy_r = length(float2(isect.x, isect.y));
+                if (xy_r > R) continue;
+
+                // Surface normal: outward from sphere center
+                float3 normal = normalize(isect - fc);
+                bool entering = (dot(dir, normal) < 0);
+
+                nearest_t = t;
+                nearest_isect = isect;
+                nearest_normal = normal;
+                nearest_elem = e;
+                nearest_ri = ri;
+                nearest_entering = entering;
             }
 
-            // Back surface: sphere center ahead of lens
-            float3 back_center = float3(0, 0, z + sqrt(r2 * r2 - R * R));
-            if (ray_sphere_intersection(back_center, r2, pos, dir, isect)) {
-                float xy_r = sqrt(isect.x * isect.x + isect.y * isect.y);
-                if (xy_r <= R) {
-                    float t = distance(isect, pos);
-                    if (t > 0.0001 && t < nearest_t) {
-                        nearest_t = t;
-                        nearest_isect = isect;
-                        // Back surface normal points away from center, flip to face ray
-                        nearest_normal = -normalize(isect - back_center);
-                        nearest_elem = e;
-                        nearest_face = 1;
-                        nearest_ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
-                    }
-                }
+            // Back surface sphere
+            float abs_r2 = abs(elem.r2);
+            float sign2 = (elem.r2 > 0) ? 1.0 : -1.0;
+            float3 bc = float3(0, 0, z + sign2 * sqrt(abs_r2 * abs_r2 - R * R));
+
+            hits = ray_sphere_t(bc, abs_r2, pos, dir, t0, t1);
+            for (int h = 0; h < 2; h++) {
+                float t = (h == 0) ? t0 : t1;
+                if (t <= 0.001 || t >= nearest_t) continue;
+                float3 isect = pos + t * dir;
+                if (isect.z < z_min || isect.z > z_max) continue;  // reject far-side hits
+                float xy_r = length(float2(isect.x, isect.y));
+                if (xy_r > R) continue;
+
+                float3 normal = normalize(isect - bc);
+                bool entering = (dot(dir, normal) < 0);
+
+                nearest_t = t;
+                nearest_isect = isect;
+                nearest_normal = normal;
+                nearest_elem = e;
+                nearest_ri = ri;
+                nearest_entering = entering;
+            }
+        }
+
+        // Check aperture: if ray crosses aperture plane before next surface, test radius
+        if (cam.aperture_radius > 0 && abs(dir.z) > 0.0001) {
+            float t_ap = (cam.aperture_z - pos.z) / dir.z;
+            if (t_ap > 0.001 && (nearest_elem < 0 || t_ap < nearest_t)) {
+                float3 ap_hit = pos + t_ap * dir;
+                float ap_r = length(float2(ap_hit.x, ap_hit.y));
+                if (ap_r > cam.aperture_radius)
+                    return false;  // blocked by aperture
             }
         }
 
         if (nearest_elem < 0) {
             // No more surfaces hit — ray exits the lens system
-            // Check ray is heading toward scene (-z direction)
             if (dir.z < 0) {
                 out_origin = pos;
                 out_dir = dir;
                 return true;
             }
-            return false;  // ray going backward toward sensor
-        }
-
-        // Determine transition: entering or exiting glass?
-        float cos_i = abs(dot(dir, nearest_normal));
-        float n1 = current_ri;
-        float n2;
-
-        // If entering glass (from air side), go to glass RI; if exiting, go to air
-        bool entering = (dot(dir, nearest_normal) < 0);
-        if (entering) {
-            n2 = nearest_ri;
-        } else {
-            n2 = 1.0;  // exiting to air
+            return false;
         }
 
         if (cam.lenses[nearest_elem].cauchy_b > 0.0001)
             hit_dispersive = true;
 
-        // Fresnel reflection probability
-        float fresnel_r = fresnel_schlick(cos_i, n1, n2);
+        // Determine entering/exiting by current medium, not geometry
+        // If we're in air (ri≈1), we must be entering glass; if in glass, exiting to air
+        bool entering = (current_ri < 1.01);
+        float n1 = current_ri;
+        float n2 = entering ? nearest_ri : 1.0;
 
-        // Probabilistic reflect vs refract
+        // Fresnel + surface reflectance (e.g. coating)
+        float cos_i = abs(dot(dir, nearest_normal));
+        float fresnel_r = fresnel_schlick(cos_i, n1, n2);
+        float surf_refl = cam.lenses[nearest_elem].reflectance;
+        fresnel_r = fresnel_r + surf_refl * (1.0 - fresnel_r);  // blend: coating on top of Fresnel
+
+        // Surface normal for refraction: must point against incoming ray
+        float3 n = (dot(dir, nearest_normal) < 0) ? nearest_normal : -nearest_normal;
+
         if (rng.uniform() < fresnel_r) {
-            // Reflect
-            float3 n = entering ? nearest_normal : -nearest_normal;
+            // Reflect off surface
             dir = normalize(dir - 2.0 * dot(dir, n) * n);
             pos = nearest_isect;
+            // current_ri unchanged
         } else {
-            // Refract
-            float3 n = entering ? nearest_normal : -nearest_normal;
+            // Refract through surface
             float eta = n1 / n2;
             float3 refracted = refract(dir, n, eta);
             if (length(refracted) < 0.001) {
@@ -434,7 +481,131 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
         }
     }
 
-    return false;  // exceeded max bounces
+    return false;
+}
+
+// --- Deterministic ghost ray through lens system ---
+// Traces a ray through the lens, forcing reflection at exactly 2 surface hits.
+// surface_hit_count tracks each surface encounter; when it equals reflect_at_1 or
+// reflect_at_2, reflection is forced. All other surfaces refract normally.
+// Returns the total weight (product of Fresnel reflectance at forced surfaces,
+// and transmittance at others). Returns 0 if the ray is blocked or doesn't exit.
+
+float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
+                              constant GPUCamera &cam, float wavelength,
+                              int reflect_at_1, int reflect_at_2,
+                              thread float3 &out_origin, thread float3 &out_dir) {
+    if (cam.num_lenses <= 0) return 0;
+
+    float3 pos = ray_origin;
+    float3 dir = ray_dir;
+    float current_ri = 1.0;
+    float weight = 1.0;
+    int surface_hit = 0;
+
+    float z_front = cam.lenses[0].z;
+    float z_back = cam.lenses[cam.num_lenses - 1].z;
+    float z_margin = abs(z_front - z_back) + 0.5;
+    float z_max = max(z_front, z_back) + z_margin;
+    float z_min = min(z_front, z_back) - z_margin;
+
+    for (int bounce = 0; bounce < LENS_MAX_BOUNCES; bounce++) {
+        float nearest_t = 1e30;
+        float3 nearest_isect;
+        float3 nearest_normal;
+        int nearest_elem = -1;
+        float nearest_ri = 1.0;
+
+        for (int e = 0; e < cam.num_lenses; e++) {
+            constant GPULensElement &elem = cam.lenses[e];
+            float z = elem.z;
+            float R = elem.radius;
+            float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
+
+            // Front surface
+            float abs_r1 = abs(elem.r1);
+            float sign1 = (elem.r1 > 0) ? 1.0 : -1.0;
+            float3 fc = float3(0, 0, z - sign1 * sqrt(abs_r1 * abs_r1 - R * R));
+            float t0, t1;
+            ray_sphere_t(fc, abs_r1, pos, dir, t0, t1);
+            for (int h = 0; h < 2; h++) {
+                float t = (h == 0) ? t0 : t1;
+                if (t <= 0.001 || t >= nearest_t) continue;
+                float3 isect = pos + t * dir;
+                if (isect.z < z_min || isect.z > z_max) continue;
+                if (length(float2(isect.x, isect.y)) > R) continue;
+                float3 normal = normalize(isect - fc);
+                nearest_t = t; nearest_isect = isect; nearest_normal = normal;
+                nearest_elem = e; nearest_ri = ri;
+            }
+
+            // Back surface
+            float abs_r2 = abs(elem.r2);
+            float sign2 = (elem.r2 > 0) ? 1.0 : -1.0;
+            float3 bc = float3(0, 0, z + sign2 * sqrt(abs_r2 * abs_r2 - R * R));
+            ray_sphere_t(bc, abs_r2, pos, dir, t0, t1);
+            for (int h = 0; h < 2; h++) {
+                float t = (h == 0) ? t0 : t1;
+                if (t <= 0.001 || t >= nearest_t) continue;
+                float3 isect = pos + t * dir;
+                if (isect.z < z_min || isect.z > z_max) continue;
+                if (length(float2(isect.x, isect.y)) > R) continue;
+                float3 normal = normalize(isect - bc);
+                nearest_t = t; nearest_isect = isect; nearest_normal = normal;
+                nearest_elem = e; nearest_ri = ri;
+            }
+        }
+
+        // Aperture check
+        if (cam.aperture_radius > 0 && abs(dir.z) > 0.0001) {
+            float t_ap = (cam.aperture_z - pos.z) / dir.z;
+            if (t_ap > 0.001 && (nearest_elem < 0 || t_ap < nearest_t)) {
+                float3 ap_hit = pos + t_ap * dir;
+                if (length(float2(ap_hit.x, ap_hit.y)) > cam.aperture_radius)
+                    return 0;  // blocked
+            }
+        }
+
+        if (nearest_elem < 0) {
+            if (dir.z < 0) {
+                out_origin = pos;
+                out_dir = dir;
+                return weight;
+            }
+            return 0;
+        }
+
+        bool entering = (current_ri < 1.01);
+        float n1 = current_ri;
+        float n2 = entering ? nearest_ri : 1.0;
+        float cos_i = abs(dot(dir, nearest_normal));
+        float fresnel_r = fresnel_schlick(cos_i, n1, n2);
+        float surf_refl = cam.lenses[nearest_elem].reflectance;
+        fresnel_r = fresnel_r + surf_refl * (1.0 - fresnel_r);
+
+        float3 n = (dot(dir, nearest_normal) < 0) ? nearest_normal : -nearest_normal;
+
+        bool force_reflect = (surface_hit == reflect_at_1 || surface_hit == reflect_at_2);
+        surface_hit++;
+
+        if (force_reflect) {
+            // Force reflection, weight by reflectance
+            weight *= fresnel_r;
+            dir = normalize(dir - 2.0 * dot(dir, n) * n);
+            pos = nearest_isect;
+        } else {
+            // Force refraction, weight by transmittance
+            weight *= (1.0 - fresnel_r);
+            float eta = n1 / n2;
+            float3 refracted = refract(dir, n, eta);
+            if (length(refracted) < 0.001) return 0;  // TIR kills this ghost path
+            dir = refracted;
+            pos = nearest_isect;
+            current_ri = n2;
+        }
+    }
+
+    return 0;
 }
 
 // --- Perturb normal for roughness (matches CPU bias) ---
@@ -453,7 +624,7 @@ float3 trace_ray(float3 origin, float3 direction,
                  thread int &out_bounces, thread bool &hit_dispersive) {
     float3 accumulated = float3(0);
     float3 throughput = float3(1);
-    hit_dispersive = false;
+    // Don't reset hit_dispersive — caller may have set it (e.g. from lens system)
 
     float3 ray_origin = origin;
     float3 ray_dir = direction;
@@ -508,6 +679,11 @@ float3 trace_ray(float3 origin, float3 direction,
         }
 
         float4 color = float4(surf.color_r, surf.color_g, surf.color_b, surf.color_a);
+
+        // Emission: emissive surfaces contribute light directly
+        if (surf.emission > 0) {
+            accumulated += throughput * surf.emission * color.rgb;
+        }
 
         // Direct lighting - skip when max contribution is negligible
         float max_phong = (1.0 - surf.transparency) * 0.9 + surf.reflectance;
@@ -675,17 +851,23 @@ kernel void trace_kernel(
     int num_samples = prev_samples;
 
     for (int i = 0; i < batch_count; i++) {
+        // Use seq_idx for low-discrepancy sequences — must advance even when rays are blocked
+        int seq_idx = prev_samples + i;
+
         // Low-discrepancy wavelength sampling (golden ratio + Cranley-Patterson rotation)
-        float wavelength = 380.0 + 400.0 * fract(float(num_samples) * 0.6180339887 + pixel_rand_w);
+        float wavelength = 380.0 + 400.0 * fract(float(seq_idx) * 0.6180339887 + pixel_rand_w);
 
         float3 cam_origin, cam_dir;
         bool dispersive = false;
 
         if (scene.camera.num_lenses > 0) {
-            // DOF: stratified lens sampling on first element's aperture
+            // DOF: stratified lens sampling — use aperture radius if defined, else front element
             constant GPULensElement &front = scene.camera.lenses[0];
-            float angle = 2.0 * M_PI_F * fract(float(num_samples) * 0.7548776662 + pixel_rand_a);
-            float rad = front.radius * sqrt(fract(float(num_samples) * 0.3247179572 + pixel_rand_b));
+            float dof_radius = front.radius;
+            if (scene.camera.aperture_radius > 0)
+                dof_radius = min(dof_radius, scene.camera.aperture_radius);
+            float angle = 2.0 * M_PI_F * fract(float(seq_idx) * 0.7548776662 + pixel_rand_a);
+            float rad = dof_radius * sqrt(fract(float(seq_idx) * 0.3247179572 + pixel_rand_b));
             float3 lens_point = float3(
                 rad * cos(angle),
                 rad * sin(angle),
