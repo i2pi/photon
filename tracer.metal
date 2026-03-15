@@ -22,7 +22,7 @@ struct GPULight {
 
 struct GPULensElement {
     float z, r1, r2, radius;
-    float cauchy_a, cauchy_b, reflectance, pad0;
+    float cauchy_a, cauchy_b, reflectance, anamorphic;
 };
 
 struct GPUCamera {
@@ -50,6 +50,7 @@ struct GPUScene {
     int num_lights;
     int num_bvh_nodes;
     int shadow_rays;
+    int ghost_rays;
     int sample_offset;   // starting sample index for this batch
     int batch_size;      // number of samples this batch
     float pad0;
@@ -313,7 +314,7 @@ float fresnel_schlick(float cosine, float n1, float n2) {
 // We trace sequentially through surfaces, with Fresnel reflection at each.
 // Reflected rays can bounce between surfaces, creating lens flare ghosts.
 
-#define LENS_MAX_BOUNCES 16
+#define LENS_MAX_BOUNCES 32
 #define LENS_EPS 1e-5  // small epsilon for thin lens elements
 
 // Find both intersection points with a sphere, return as t values along the ray.
@@ -333,6 +334,54 @@ int ray_sphere_t(float3 center, float radius, float3 origin, float3 dir,
     if (t0 > LENS_EPS) count++;
     if (t1 > LENS_EPS) count++;
     return count;
+}
+
+// Find intersection with a cylinder whose axis is in the x-y plane at angle `axis_angle` (degrees).
+// axis_angle=90 => axis along y (curved in x-z), axis_angle=180 => axis along -x (curved in y-z), etc.
+// center_z = z position of the cylinder center on the optical axis.
+// The cylinder is infinite along the axis direction, curved perpendicular to it.
+int ray_cylinder_t(float center_z, float radius, float axis_angle_deg,
+                   float3 origin, float3 dir,
+                   thread float &t0, thread float &t1) {
+    // Cylinder axis direction in x-y plane
+    float theta = axis_angle_deg * (M_PI_F / 180.0);
+    float2 axis = float2(cos(theta), sin(theta));
+    // Perpendicular direction in x-y plane
+    float2 perp = float2(-axis.y, axis.x);
+
+    // Project ray origin and direction onto (perp, z) plane
+    float3 oc = origin - float3(0, 0, center_z);
+    float oc_p = oc.x * perp.x + oc.y * perp.y;  // perp component
+    float oc_z = oc.z;                              // z component
+    float dir_p = dir.x * perp.x + dir.y * perp.y;
+    float dir_z = dir.z;
+
+    // 2D circle intersection in (perp, z) space
+    float a = dir_p * dir_p + dir_z * dir_z;
+    if (a < 1e-10) return 0;
+    float b = oc_p * dir_p + oc_z * dir_z;
+    float c = oc_p * oc_p + oc_z * oc_z - radius * radius;
+    float disc = b * b - a * c;
+    if (disc < 0) return 0;
+    float sq = sqrt(disc);
+    float inv_a = 1.0 / a;
+    t0 = (-b - sq) * inv_a;
+    t1 = (-b + sq) * inv_a;
+    int count = 0;
+    if (t0 > LENS_EPS) count++;
+    if (t1 > LENS_EPS) count++;
+    return count;
+}
+
+// Cylinder surface normal at intersection point
+float3 cylinder_normal(float3 isect, float center_z, float axis_angle_deg) {
+    float theta = axis_angle_deg * (M_PI_F / 180.0);
+    float2 axis = float2(cos(theta), sin(theta));
+    // Project intersection onto axis to find closest point on cylinder axis
+    float3 oc = isect - float3(0, 0, center_z);
+    float along_axis = oc.x * axis.x + oc.y * axis.y;
+    float3 axis_point = float3(along_axis * axis.x, along_axis * axis.y, 0);
+    return normalize(oc - axis_point);
 }
 
 bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
@@ -368,24 +417,31 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
             float R = elem.radius;
             float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
 
-            // Front surface sphere
+            // Front surface
             float abs_r1 = abs(elem.r1);
             float sign1 = (elem.r1 > 0) ? 1.0 : -1.0;
-            float3 fc = float3(0, 0, z - sign1 * sqrt(abs_r1 * abs_r1 - R * R));
+            float fc_z = z - sign1 * sqrt(abs_r1 * abs_r1 - R * R);
+            bool is_cyl = (elem.anamorphic > 0.5);
+            float cyl_angle = elem.anamorphic;
 
             float t0, t1;
-            int hits = ray_sphere_t(fc, abs_r1, pos, dir, t0, t1);
+            if (is_cyl) {
+                ray_cylinder_t(fc_z, abs_r1, cyl_angle, pos, dir, t0, t1);
+            } else {
+                ray_sphere_t(float3(0, 0, fc_z), abs_r1, pos, dir, t0, t1);
+            }
             // Check both intersections
             for (int h = 0; h < 2; h++) {
                 float t = (h == 0) ? t0 : t1;
                 if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
-                if (isect.z < z_min || isect.z > z_max) continue;  // reject far-side hits
+                if (isect.z < z_min || isect.z > z_max) continue;
                 float xy_r = length(float2(isect.x, isect.y));
                 if (xy_r > R) continue;
 
-                // Surface normal: outward from sphere center
-                float3 normal = normalize(isect - fc);
+                float3 normal = is_cyl
+                    ? cylinder_normal(isect, fc_z, cyl_angle)
+                    : normalize(isect - float3(0, 0, fc_z));
                 bool entering = (dot(dir, normal) < 0);
 
                 nearest_t = t;
@@ -396,21 +452,27 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
                 nearest_entering = entering;
             }
 
-            // Back surface sphere
+            // Back surface
             float abs_r2 = abs(elem.r2);
             float sign2 = (elem.r2 > 0) ? 1.0 : -1.0;
-            float3 bc = float3(0, 0, z + sign2 * sqrt(abs_r2 * abs_r2 - R * R));
+            float bc_z = z + sign2 * sqrt(abs_r2 * abs_r2 - R * R);
 
-            hits = ray_sphere_t(bc, abs_r2, pos, dir, t0, t1);
+            if (is_cyl) {
+                ray_cylinder_t(bc_z, abs_r2, cyl_angle, pos, dir, t0, t1);
+            } else {
+                ray_sphere_t(float3(0, 0, bc_z), abs_r2, pos, dir, t0, t1);
+            }
             for (int h = 0; h < 2; h++) {
                 float t = (h == 0) ? t0 : t1;
                 if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
-                if (isect.z < z_min || isect.z > z_max) continue;  // reject far-side hits
+                if (isect.z < z_min || isect.z > z_max) continue;
                 float xy_r = length(float2(isect.x, isect.y));
                 if (xy_r > R) continue;
 
-                float3 normal = normalize(isect - bc);
+                float3 normal = is_cyl
+                    ? cylinder_normal(isect, bc_z, cyl_angle)
+                    : normalize(isect - float3(0, 0, bc_z));
                 bool entering = (dot(dir, normal) < 0);
 
                 nearest_t = t;
@@ -443,7 +505,7 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
             return false;
         }
 
-        if (cam.lenses[nearest_elem].cauchy_b > 0.0001)
+        if (cam.lenses[nearest_elem].cauchy_b > 0.02)
             hit_dispersive = true;
 
         // Determine entering/exiting by current medium, not geometry
@@ -452,10 +514,9 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
         float n1 = current_ri;
         float n2 = entering ? nearest_ri : 1.0;
 
-        // Fresnel + surface reflectance (e.g. coating)
-        // AR coating factor: real multi-coated lenses reduce Fresnel to ~0.5% per surface
+        // Fresnel + surface reflectance
         float cos_i = abs(dot(dir, nearest_normal));
-        float fresnel_r = fresnel_schlick(cos_i, n1, n2) * 0.1;  // AR coating: 90% reduction
+        float fresnel_r = fresnel_schlick(cos_i, n1, n2);
         float surf_refl = cam.lenses[nearest_elem].reflectance;
         fresnel_r = fresnel_r + surf_refl * (1.0 - fresnel_r);  // blend: explicit reflectance on top
 
@@ -487,15 +548,15 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
 }
 
 // --- Deterministic ghost ray through lens system ---
-// Traces a ray through the lens, forcing reflection at exactly 2 surface hits.
-// surface_hit_count tracks each surface encounter; when it equals reflect_at_1 or
-// reflect_at_2, reflection is forced. All other surfaces refract normally.
-// Returns the total weight (product of Fresnel reflectance at forced surfaces,
-// and transmittance at others). Returns 0 if the ray is blocked or doesn't exit.
+// Traces a ray through the lens, forcing reflection at exactly 2 physical surfaces.
+// Surface IDs: elem_index * 2 + side (0=front, 1=back).
+// reflect_surf_1 should be the DEEPER surface (higher z-depth, hit first on forward pass).
+// reflect_surf_2 should be the SHALLOWER surface (hit on the backward bounce).
+// Returns weight (product of reflectances/transmittances). 0 = path failed.
 
 float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
                               constant GPUCamera &cam, float wavelength,
-                              int reflect_at_1, int reflect_at_2,
+                              int reflect_surf_1, int reflect_surf_2,
                               thread float3 &out_origin, thread float3 &out_dir) {
     if (cam.num_lenses <= 0) return 0;
 
@@ -503,7 +564,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
     float3 dir = ray_dir;
     float current_ri = 1.0;
     float weight = 1.0;
-    int surface_hit = 0;
+    int reflections_done = 0;
 
     float z_front = cam.lenses[0].z;
     float z_back = cam.lenses[cam.num_lenses - 1].z;
@@ -516,45 +577,56 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
         float3 nearest_isect;
         float3 nearest_normal;
         int nearest_elem = -1;
+        int nearest_surf_id = -1;  // physical surface ID
         float nearest_ri = 1.0;
 
         for (int e = 0; e < cam.num_lenses; e++) {
             constant GPULensElement &elem = cam.lenses[e];
             float z = elem.z;
             float R = elem.radius;
-            float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
+            // Amplify dispersion for ghost rays — spreads wavelengths apart
+            // to create visible rainbow. Still physics-based: same ray paths
+            // through real lens geometry, just with boosted chromatic separation.
+            float ghost_dispersion_boost = 15.0;
+            float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b * ghost_dispersion_boost, wavelength);
+            bool is_cyl = (elem.anamorphic > 0.5);
+            float cyl_ang = elem.anamorphic;
 
-            // Front surface
+            // Front surface (surf_id = e*2)
             float abs_r1 = abs(elem.r1);
             float sign1 = (elem.r1 > 0) ? 1.0 : -1.0;
-            float3 fc = float3(0, 0, z - sign1 * sqrt(abs_r1 * abs_r1 - R * R));
+            float fc_z = z - sign1 * sqrt(abs_r1 * abs_r1 - R * R);
             float t0, t1;
-            ray_sphere_t(fc, abs_r1, pos, dir, t0, t1);
+            if (is_cyl) ray_cylinder_t(fc_z, abs_r1, cyl_ang, pos, dir, t0, t1);
+            else ray_sphere_t(float3(0, 0, fc_z), abs_r1, pos, dir, t0, t1);
             for (int h = 0; h < 2; h++) {
                 float t = (h == 0) ? t0 : t1;
                 if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;
                 if (length(float2(isect.x, isect.y)) > R) continue;
-                float3 normal = normalize(isect - fc);
+                float3 normal = is_cyl ? cylinder_normal(isect, fc_z, cyl_ang)
+                                       : normalize(isect - float3(0, 0, fc_z));
                 nearest_t = t; nearest_isect = isect; nearest_normal = normal;
-                nearest_elem = e; nearest_ri = ri;
+                nearest_elem = e; nearest_ri = ri; nearest_surf_id = e * 2;
             }
 
-            // Back surface
+            // Back surface (surf_id = e*2 + 1)
             float abs_r2 = abs(elem.r2);
             float sign2 = (elem.r2 > 0) ? 1.0 : -1.0;
-            float3 bc = float3(0, 0, z + sign2 * sqrt(abs_r2 * abs_r2 - R * R));
-            ray_sphere_t(bc, abs_r2, pos, dir, t0, t1);
+            float bc_z = z + sign2 * sqrt(abs_r2 * abs_r2 - R * R);
+            if (is_cyl) ray_cylinder_t(bc_z, abs_r2, cyl_ang, pos, dir, t0, t1);
+            else ray_sphere_t(float3(0, 0, bc_z), abs_r2, pos, dir, t0, t1);
             for (int h = 0; h < 2; h++) {
                 float t = (h == 0) ? t0 : t1;
                 if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;
                 if (length(float2(isect.x, isect.y)) > R) continue;
-                float3 normal = normalize(isect - bc);
+                float3 normal = is_cyl ? cylinder_normal(isect, bc_z, cyl_ang)
+                                       : normalize(isect - float3(0, 0, bc_z));
                 nearest_t = t; nearest_isect = isect; nearest_normal = normal;
-                nearest_elem = e; nearest_ri = ri;
+                nearest_elem = e; nearest_ri = ri; nearest_surf_id = e * 2 + 1;
             }
         }
 
@@ -564,17 +636,17 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
             if (t_ap > LENS_EPS && (nearest_elem < 0 || t_ap < nearest_t)) {
                 float3 ap_hit = pos + t_ap * dir;
                 if (length(float2(ap_hit.x, ap_hit.y)) > cam.aperture_radius)
-                    return 0;  // blocked
+                    return 0;
             }
         }
 
         if (nearest_elem < 0) {
-            if (dir.z < 0) {
+            if (dir.z < 0 && reflections_done == 2) {
                 out_origin = pos;
                 out_dir = dir;
                 return weight;
             }
-            return 0;
+            return 0;  // exited without completing both reflections
         }
 
         bool entering = (current_ri < 1.01);
@@ -587,20 +659,23 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
 
         float3 n = (dot(dir, nearest_normal) < 0) ? nearest_normal : -nearest_normal;
 
-        bool force_reflect = (surface_hit == reflect_at_1 || surface_hit == reflect_at_2);
-        surface_hit++;
+        // Force reflection at target surfaces (only if we haven't already reflected there)
+        bool force_reflect = false;
+        if (reflections_done == 0 && nearest_surf_id == reflect_surf_1)
+            force_reflect = true;
+        else if (reflections_done == 1 && nearest_surf_id == reflect_surf_2)
+            force_reflect = true;
 
         if (force_reflect) {
-            // Force reflection, weight by reflectance
             weight *= fresnel_r;
             dir = normalize(dir - 2.0 * dot(dir, n) * n);
             pos = nearest_isect;
+            reflections_done++;
         } else {
-            // Force refraction, weight by transmittance
             weight *= (1.0 - fresnel_r);
             float eta = n1 / n2;
             float3 refracted = refract(dir, n, eta);
-            if (length(refracted) < 0.001) return 0;  // TIR kills this ghost path
+            if (length(refracted) < 0.001) return 0;
             dir = refracted;
             pos = nearest_isect;
             current_ri = n2;
@@ -756,7 +831,7 @@ float3 trace_ray(float3 origin, float3 direction,
             if (dot(op, rough_normal) < 0) {
                 // Outside surface
                 float surf_ri = cauchy_ri(surf.cauchy_a, surf.cauchy_b, wavelength);
-                if (surf.cauchy_b > 0.0001) hit_dispersive = true;
+                if (surf.cauchy_b > 0.02) hit_dispersive = true;
                 float eta = ray_ri / surf_ri;
                 refracted = refract(ray_dir, rough_normal, eta);
                 if (length(refracted) > 0.001) {
@@ -789,8 +864,9 @@ float3 trace_ray(float3 origin, float3 direction,
 
 // --- Main kernel ---
 
-// Accumulation buffer layout per pixel: [R_sum, G_sum, B_sum, num_samples, running_mean, M2]
-#define ACCUM_STRIDE 6
+// Accumulation buffer layout per pixel:
+// [R_sum, G_sum, B_sum, num_samples, running_mean, M2, ghost_R, ghost_G, ghost_B, ghost_n]
+#define ACCUM_STRIDE 10
 
 kernel void trace_kernel(
     constant GPUScene &scene [[buffer(0)]],
@@ -815,6 +891,10 @@ kernel void trace_kernel(
     int prev_samples = int(accum[aidx + 3]);
     float running_mean = accum[aidx + 4];
     float M2 = accum[aidx + 5]; // sum of squared differences (Welford)
+    float ghost_R = accum[aidx + 6];
+    float ghost_G = accum[aidx + 7];
+    float ghost_B = accum[aidx + 8];
+    float ghost_n = accum[aidx + 9];
 
     // Already converged from previous batch?
     if (prev_samples >= scene.max_samples) return;
@@ -860,6 +940,7 @@ kernel void trace_kernel(
         float wavelength = 380.0 + 400.0 * fract(float(seq_idx) * 0.6180339887 + pixel_rand_w);
 
         float3 cam_origin, cam_dir;
+        float3 lens_point = float3(0, 0, 0);
         bool dispersive = false;
 
         if (scene.camera.num_lenses > 0) {
@@ -870,7 +951,7 @@ kernel void trace_kernel(
                 dof_radius = min(dof_radius, scene.camera.aperture_radius);
             float angle = 2.0 * M_PI_F * fract(float(seq_idx) * 0.7548776662 + pixel_rand_a);
             float rad = dof_radius * sqrt(fract(float(seq_idx) * 0.3247179572 + pixel_rand_b));
-            float3 lens_point = float3(
+            lens_point = float3(
                 rad * cos(angle),
                 rad * sin(angle),
                 front.z
@@ -901,14 +982,74 @@ kernel void trace_kernel(
         float cosine = 0.5 + 0.5 * (-cam_dir.z);
         color *= cosine;
 
-        // Clamp fireflies: cap per-sample luminance to prevent spectral outliers
+        // Soft firefly clamp: smoothly compress bright outliers
+        // Values below threshold pass unchanged; above, they're compressed
         float lum_check = color.r + color.g + color.b;
-        if (lum_check > 30.0) color *= 30.0 / lum_check;
+        float clamp_knee = 2.5;
+        if (lum_check > clamp_knee) {
+            float excess = lum_check - clamp_knee;
+            float compressed = clamp_knee + clamp_knee * excess / (clamp_knee + excess);
+            color *= compressed / lum_check;
+        }
 
         R += color.r;
         G += color.g;
         B += color.b;
         num_samples++;
+
+        // Ghost rays: accumulated SEPARATELY from main image to avoid noise contamination.
+        // Only trace every 4th sample — ghosts are deterministic per-pixel (no DOF)
+        // so fewer samples suffice. The wavelength still varies, giving spectral spread.
+        if (scene.ghost_rays && scene.camera.num_lenses >= 2 && (seq_idx & 3) == 0) {
+            int num_surfaces = scene.camera.num_lenses * 2;
+            float3 ghost_lens_center = float3(0, 0, scene.camera.lenses[0].z);
+            float3 ghost_ray_dir = normalize(ghost_lens_center - sensor_origin);
+
+            for (int s1 = 1; s1 < num_surfaces; s1++) {
+                for (int s2 = 0; s2 < s1; s2++) {
+                    // Only trace pairs where at least one surface is on an anamorphic element
+                    // (these create the directional streak; spherical pairs just add circular haze)
+                    int e1 = s1 / 2;
+                    int e2 = s2 / 2;
+                    bool has_anamorphic = (scene.camera.lenses[e1].anamorphic > 0.5) ||
+                                          (scene.camera.lenses[e2].anamorphic > 0.5);
+                    if (!has_anamorphic) continue;
+
+                    float3 ghost_origin, ghost_dir;
+                    float gw = ray_ghost_through_lens(
+                        sensor_origin, ghost_ray_dir,
+                        scene.camera, wavelength, s1, s2,
+                        ghost_origin, ghost_dir);
+
+                    if (gw > 0.0001) {
+                        for (int si = 0; si < scene.num_spheres; si++) {
+                            if (scene.spheres[si].emission < 1.0) continue;
+                            float3 sc = float3(scene.spheres[si].cx,
+                                               scene.spheres[si].cy,
+                                               scene.spheres[si].cz);
+                            float sr = scene.spheres[si].radius;
+                            float3 oc = ghost_origin - sc;
+                            float gb = dot(oc, ghost_dir);
+                            float gc_disc = gb * gb - (dot(oc, oc) - sr * sr);
+                            if (gc_disc > 0) {
+                                float gt = -gb - sqrt(gc_disc);
+                                if (gt > 0.001) {
+                                    float3 gc = float3(scene.spheres[si].color_r,
+                                                       scene.spheres[si].color_g,
+                                                       scene.spheres[si].color_b);
+                                    gc *= scene.spheres[si].emission * gw;
+                                    gc *= wavelength_to_rgb(wavelength, spec_norm);
+                                    ghost_R += gc.r;
+                                    ghost_G += gc.g;
+                                    ghost_B += gc.b;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ghost_n += 1.0;
+        }
 
         // Adaptive convergence (Welford's online variance)
         float lum = color.r + color.g + color.b;
@@ -936,12 +1077,22 @@ kernel void trace_kernel(
     accum[aidx + 3] = float(num_samples);
     accum[aidx + 4] = running_mean;
     accum[aidx + 5] = M2;
+    accum[aidx + 6] = ghost_R;
+    accum[aidx + 7] = ghost_G;
+    accum[aidx + 8] = ghost_B;
+    accum[aidx + 9] = ghost_n;
 
-    // Write current best output (averaged)
+    // Output: main image + ghost overlay
     int n = max(num_samples, 1);
     float inv_n = 1.0 / float(n);
+    float ginv = (ghost_n > 0) ? (1.0 / ghost_n) : 0.0;
+
+    // Ghost average
+    float3 gavg = float3(ghost_R, ghost_G, ghost_B) * ginv;
+
+    // Output raw HDR — tonemapping happens in host
     int idx = pixel_idx * 3;
-    output[idx + 0] = R * inv_n;
-    output[idx + 1] = G * inv_n;
-    output[idx + 2] = B * inv_n;
+    output[idx + 0] = R * inv_n + gavg.r;
+    output[idx + 1] = G * inv_n + gavg.g;
+    output[idx + 2] = B * inv_n + gavg.b;
 }

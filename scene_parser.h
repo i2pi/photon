@@ -9,6 +9,7 @@ typedef struct {
 	float	qual_thresh;
 	int		trace_depth;
 	int		shadow_rays;
+	int		ghost_rays;
 } render_settingsT;
 
 sceneT *load_scene(const char *filename, render_settingsT *settings);

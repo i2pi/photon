@@ -27,7 +27,7 @@ typedef struct {
 
 typedef struct {
     float z, r1, r2, radius;
-    float cauchy_a, cauchy_b, reflectance, pad0;
+    float cauchy_a, cauchy_b, reflectance, anamorphic;
 } GPULensElement;
 
 typedef struct {
@@ -55,6 +55,7 @@ typedef struct {
     int num_lights;
     int num_bvh_nodes;
     int shadow_rays;
+    int ghost_rays;
     int sample_offset;
     int batch_size;
     float pad0;
@@ -226,17 +227,10 @@ static int build_bvh(GPUSurface *spheres, int *indices, int start, int count) {
     return ni;
 }
 
-static float gpu_gamma(float x) {
-    x = powf(x - 0.05f, 1.1f);
-    if (x > 1.0f) x = 1.0f;
-    if (x < 0.0f) x = 0.0f;
-    return x;
-}
-
 void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
                              int min_samples, int max_samples,
                              float qual_thresh, int trace_depth,
-                             int shadow_rays,
+                             int shadow_rays, int ghost_rays,
                              char *pixels, float *pixels_f) {
     if (!gpu_ready) {
         fprintf(stderr, "Metal: not initialized\n");
@@ -255,6 +249,7 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
         gpu_scene.qual_thresh = qual_thresh;
         gpu_scene.trace_depth = trace_depth;
         gpu_scene.shadow_rays = shadow_rays;
+        gpu_scene.ghost_rays = ghost_rays;
         gpu_scene.frame_seed = arc4random();
 
         // Precompute spectral normalization (same as GPU compute_spectral_norm)
@@ -299,6 +294,7 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             gpu_scene.camera.lenses[i].cauchy_a = lens->cauchy_a;
             gpu_scene.camera.lenses[i].cauchy_b = lens->cauchy_b;
             gpu_scene.camera.lenses[i].reflectance = lens->reflectance;
+            gpu_scene.camera.lenses[i].anamorphic = lens->anamorphic;
         }
 
         // Pack objects: separate spheres and planes
@@ -353,7 +349,7 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
 
         // Create buffers
         size_t output_size = sizeof(float) * width * height * 3;
-        size_t accum_size = sizeof(float) * width * height * 6; // R,G,B,count,running_mean,last_check_mean
+        size_t accum_size = sizeof(float) * width * height * 10; // R,G,B,count,running_mean,M2,ghostR,ghostG,ghostB,ghost_n
 
         id<MTLBuffer> output_buf = [mtl_device newBufferWithLength:output_size
                                                            options:MTLResourceStorageModeShared];
@@ -417,9 +413,27 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
 
         for (int i = 0; i < width * height; i++) {
             int idx = i * 3;
-            pixels[idx + 0] = (char)(gpu_gamma(gpu_output[idx + 0]) * 255);
-            pixels[idx + 1] = (char)(gpu_gamma(gpu_output[idx + 1]) * 255);
-            pixels[idx + 2] = (char)(gpu_gamma(gpu_output[idx + 2]) * 255);
+            float r = gpu_output[idx + 0];
+            float g = gpu_output[idx + 1];
+            float b = gpu_output[idx + 2];
+            if (r < 0) r = 0; if (g < 0) g = 0; if (b < 0) b = 0;
+            // Luminance-based ACES filmic tonemapping — good contrast + HDR compression
+            // while preserving color saturation
+            float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+            if (lum > 0.0001f) {
+                // ACES filmic curve (Narkowicz approximation, includes sRGB gamma)
+                float L = lum;
+                float mapped = (L * (2.51f * L + 0.03f)) / (L * (2.43f * L + 0.59f) + 0.14f);
+                if (mapped > 1.0f) mapped = 1.0f;
+                float scale = mapped / lum;
+                r *= scale; g *= scale; b *= scale;
+            }
+            if (r > 1.0f) r = 1.0f;
+            if (g > 1.0f) g = 1.0f;
+            if (b > 1.0f) b = 1.0f;
+            pixels[idx + 0] = (char)(r * 255);
+            pixels[idx + 1] = (char)(g * 255);
+            pixels[idx + 2] = (char)(b * 255);
         }
 
         // Diagnostic analysis from accumulation buffer
@@ -430,7 +444,7 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
         int hist[5] = {0, 0, 0, 0, 0};
 
         for (int i = 0; i < num_pixels; i++) {
-            float s = ac[i * 6 + 3];
+            float s = ac[i * 10 + 3];
             total_samples += s;
             if (s < min_samples_px) min_samples_px = s;
             if (s > max_samples_px) max_samples_px = s;
@@ -454,7 +468,7 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
         for (int py = height/2; py <= height/2; py++) {
             for (int px = width/4; px <= 3*width/4; px += width/4) {
                 int pi = py * width + px;
-                int ai = pi * 6;
+                int ai = pi * 10;
                 float n = ac[ai + 3];
                 float mean = ac[ai + 4];
                 float m2 = ac[ai + 5];

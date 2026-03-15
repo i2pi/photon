@@ -74,6 +74,7 @@ typedef struct {
 	float	cauchy_a, cauchy_b;
 	float	radius;
 	float	reflectance;	// surface reflectance (0=Fresnel only, >0 adds fixed reflection)
+	float	anamorphic;		// 0=spherical, 1=cylindrical (curved in y, flat in x)
 	objectT	*object;
 } lensT;
 

@@ -87,6 +87,7 @@ sceneT *load_scene(const char *filename, render_settingsT *settings) {
 	settings->qual_thresh = 0.1f;
 	settings->trace_depth = 8;
 	settings->shadow_rays = 1;
+	settings->ghost_rays = 1;
 
 	sceneT *s = create_scene();
 	char line[MAX_LINE];
@@ -108,6 +109,7 @@ sceneT *load_scene(const char *filename, render_settingsT *settings) {
 			settings->qual_thresh = get_kv_float(tokens, n, "qual_thresh", settings->qual_thresh);
 			settings->trace_depth = get_kv_int(tokens, n, "trace_depth", settings->trace_depth);
 			settings->shadow_rays = get_kv_int(tokens, n, "shadow_rays", settings->shadow_rays);
+			settings->ghost_rays = get_kv_int(tokens, n, "ghost_rays", settings->ghost_rays);
 
 		} else if (strcmp(cmd, "camera") == 0) {
 			s->camera.z = get_kv_float(tokens, n, "z", s->camera.z);
@@ -125,7 +127,9 @@ sceneT *load_scene(const char *filename, render_settingsT *settings) {
 			float ca = get_kv_float(tokens, n, "cauchy_a", 1.5);
 			float cb = get_kv_float(tokens, n, "cauchy_b", 0.0);
 			float refl = get_kv_float(tokens, n, "reflectance", 0.0);
+			float anam = get_kv_float(tokens, n, "anamorphic", 0.0);
 			add_lens_to_camera(&s->camera, z, r1, r2, r, ca, cb, refl);
+			s->camera.lens[s->camera.lenses - 1].anamorphic = anam;
 			add_object_to_scene(s, s->camera.lens[s->camera.lenses - 1].object);
 
 		} else if (strcmp(cmd, "sphere") == 0) {

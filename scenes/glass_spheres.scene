@@ -1,33 +1,37 @@
 # Glass spheres scene — pink sphere with nested glass shells
 # Petzval lens — 4 elements in 2 groups
 
-render width=1024 height=1024 min_samples=128 max_samples=4000 qual_thresh=0.02 trace_depth=48 shadow_rays=0
+render width=512 height=512 min_samples=256 max_samples=4000 qual_thresh=0.01 trace_depth=32 shadow_rays=0 ghost_rays=0
 
 camera z=0.5 d=0.50
 
 # Petzval Group 1: crown biconvex + flint meniscus
-lens z=0.000  r1=1.15  r2=1.15  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.0
-lens z=-0.012 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.05
+lens z=0.000  r1=1.15  r2=1.15  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.0 
+lens z=-0.012 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.05 
 
-aperture z=-0.025 radius=0.18
+#aperture z=-0.025 radius=0.18
+lens z=-0.025 r1=-0.8  r2=0.9   radius=0.5 cauchy_a=1.02 cauchy_b=0.02 reflectance=0.15 anamorphic=45
 
 # Petzval Group 2: crown biconvex + flint meniscus
-lens z=-0.040 r1=1.60  r2=1.60  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.07
-lens z=-0.052 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.09
+lens z=-0.040 r1=1.60  r2=1.60  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.01
+lens z=-0.052 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.06
 
 # Pink center sphere
-sphere pos=-0.3000,0.0,-3.05 radius=0.9 color=0.99,0.58,0.62 roughness=1.0
+#sphere pos=-0.3000,0.0,-3.05 radius=0.9 color=0.99,0.58,0.62 roughness=1.0
 
 # Glass shells
 sphere pos=0.0788,0.0,-3.05 radius=1.0400 color=0.5,0.75,0.75 transparency=0.970 cauchy_a=1.1000 cauchy_b=0.01
 sphere pos=0.0401,0.0,-3.05 radius=1.3792 color=0.5,0.75,0.75 transparency=0.945 cauchy_a=1.1869 cauchy_b=0.01
 sphere pos=-0.0122,0.0,-3.05 radius=1.6597 color=0.5,0.75,0.75 transparency=0.920 cauchy_a=1.3739 cauchy_b=0.0
 sphere pos=-0.0760,0.0,-3.05 radius=1.4722 color=0.5,0.75,0.75 transparency=0.995 cauchy_a=1.3608 cauchy_b=0.01
-sphere pos=-0.1486,0.0,-3.05 radius=1.0780 color=0.5,0.75,0.75 transparency=0.970 cauchy_a=1.2477 cauchy_b=0.0 emission=0.0
-sphere pos=-0.2274,0.0,-3.05 radius=1.2816 color=0.5,0.75,0.75 transparency=1.0 cauchy_a=1.0347 cauchy_b=0.1
+sphere pos=-0.1486,0.0,-3.05 radius=1.0780 color=0.5,0.75,0.75 transparency=0.970 cauchy_a=1.2477 cauchy_b=0.0 
+sphere pos=-0.2274,0.0,-3.05 radius=1.2816 color=0.5,0.75,0.75 transparency=1.0 cauchy_a=1.2347 cauchy_b=0.03
 
 # Background plane — bright
 plane normal=0,0,1 d=-800 color=0.95,0.97,0.96 reflectance=0.2 roughness=0.5
+
+# Bright point source for flares — inside FOV, near edge of glass shells
+#sphere pos=1.0,0.3,-2.5 radius=0.10 color=1.0,1.0,0.95 emission=800.0
 
 # Lights
 light pos=-1,7,5 intensity=0.8
