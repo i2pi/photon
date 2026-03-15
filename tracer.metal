@@ -314,6 +314,7 @@ float fresnel_schlick(float cosine, float n1, float n2) {
 // Reflected rays can bounce between surfaces, creating lens flare ghosts.
 
 #define LENS_MAX_BOUNCES 16
+#define LENS_EPS 1e-5  // small epsilon for thin lens elements
 
 // Find both intersection points with a sphere, return as t values along the ray.
 // Returns count of valid (positive) intersections.
@@ -329,8 +330,8 @@ int ray_sphere_t(float3 center, float radius, float3 origin, float3 dir,
     t1 = -b + sq;
     // Return count of valid t values (epsilon to avoid self-intersection)
     int count = 0;
-    if (t0 > 0.001) count++;
-    if (t1 > 0.001) count++;
+    if (t0 > LENS_EPS) count++;
+    if (t1 > LENS_EPS) count++;
     return count;
 }
 
@@ -377,7 +378,7 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
             // Check both intersections
             for (int h = 0; h < 2; h++) {
                 float t = (h == 0) ? t0 : t1;
-                if (t <= 0.001 || t >= nearest_t) continue;
+                if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;  // reject far-side hits
                 float xy_r = length(float2(isect.x, isect.y));
@@ -403,7 +404,7 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
             hits = ray_sphere_t(bc, abs_r2, pos, dir, t0, t1);
             for (int h = 0; h < 2; h++) {
                 float t = (h == 0) ? t0 : t1;
-                if (t <= 0.001 || t >= nearest_t) continue;
+                if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;  // reject far-side hits
                 float xy_r = length(float2(isect.x, isect.y));
@@ -424,7 +425,7 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
         // Check aperture: if ray crosses aperture plane before next surface, test radius
         if (cam.aperture_radius > 0 && abs(dir.z) > 0.0001) {
             float t_ap = (cam.aperture_z - pos.z) / dir.z;
-            if (t_ap > 0.001 && (nearest_elem < 0 || t_ap < nearest_t)) {
+            if (t_ap > LENS_EPS && (nearest_elem < 0 || t_ap < nearest_t)) {
                 float3 ap_hit = pos + t_ap * dir;
                 float ap_r = length(float2(ap_hit.x, ap_hit.y));
                 if (ap_r > cam.aperture_radius)
@@ -452,10 +453,11 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
         float n2 = entering ? nearest_ri : 1.0;
 
         // Fresnel + surface reflectance (e.g. coating)
+        // AR coating factor: real multi-coated lenses reduce Fresnel to ~0.5% per surface
         float cos_i = abs(dot(dir, nearest_normal));
-        float fresnel_r = fresnel_schlick(cos_i, n1, n2);
+        float fresnel_r = fresnel_schlick(cos_i, n1, n2) * 0.1;  // AR coating: 90% reduction
         float surf_refl = cam.lenses[nearest_elem].reflectance;
-        fresnel_r = fresnel_r + surf_refl * (1.0 - fresnel_r);  // blend: coating on top of Fresnel
+        fresnel_r = fresnel_r + surf_refl * (1.0 - fresnel_r);  // blend: explicit reflectance on top
 
         // Surface normal for refraction: must point against incoming ray
         float3 n = (dot(dir, nearest_normal) < 0) ? nearest_normal : -nearest_normal;
@@ -530,7 +532,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
             ray_sphere_t(fc, abs_r1, pos, dir, t0, t1);
             for (int h = 0; h < 2; h++) {
                 float t = (h == 0) ? t0 : t1;
-                if (t <= 0.001 || t >= nearest_t) continue;
+                if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;
                 if (length(float2(isect.x, isect.y)) > R) continue;
@@ -546,7 +548,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
             ray_sphere_t(bc, abs_r2, pos, dir, t0, t1);
             for (int h = 0; h < 2; h++) {
                 float t = (h == 0) ? t0 : t1;
-                if (t <= 0.001 || t >= nearest_t) continue;
+                if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;
                 if (length(float2(isect.x, isect.y)) > R) continue;
@@ -559,7 +561,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
         // Aperture check
         if (cam.aperture_radius > 0 && abs(dir.z) > 0.0001) {
             float t_ap = (cam.aperture_z - pos.z) / dir.z;
-            if (t_ap > 0.001 && (nearest_elem < 0 || t_ap < nearest_t)) {
+            if (t_ap > LENS_EPS && (nearest_elem < 0 || t_ap < nearest_t)) {
                 float3 ap_hit = pos + t_ap * dir;
                 if (length(float2(ap_hit.x, ap_hit.y)) > cam.aperture_radius)
                     return 0;  // blocked
