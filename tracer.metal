@@ -1225,7 +1225,7 @@ kernel void ghost_kernel(
                         if (refl_cos > 0 && spec_mult > 0) {
                             float light_dist = length(lp - hit_point);
                             float atten = 1.0 / (1.0 + light_dist * 0.0001);
-                            float ghost_phong = min(surf.phong, 80.0f);
+                            float ghost_phong = min(surf.phong, 500.0f);
                             ghost_contrib += pow(refl_cos, ghost_phong) * spec_mult * lc * atten;
                         }
                     }
@@ -1243,7 +1243,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 0.0;
+    float ghost_boost = 5.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
@@ -1256,13 +1256,11 @@ kernel void ghost_kernel(
     output[gidx + 2] += ghost_B * ginv * ghost_boost;
 }
 
-// --- Source-driven streak kernel (probabilistic flare from glints) ---
-// Traces rays from computed glint positions through the lens system using
-// probabilistic Fresnel (reflect/refract at each surface). Accumulates
-// any ray that reaches the sensor after at least 1 reflection on a
-// cylindrical surface. The cylinder creates horizontal spread.
-
-#define FLARE_MAX_BOUNCES 32
+// --- Source-driven streak kernel (cylinder-only transmission PSF) ---
+// Traces rays from computed glint positions through ONLY the cylindrical lens
+// element(s) via pure transmission. The cylinder refracts differently in X vs Y,
+// creating a horizontally elongated PSF (streak) for each point source.
+// Spherical elements are skipped to isolate the anamorphic line-spread effect.
 
 kernel void flare_kernel(
     constant GPUScene &scene [[buffer(0)]],
@@ -1315,7 +1313,7 @@ kernel void flare_kernel(
         glint_pos = best_center + best_radius * h;
     }
 
-    // Sample entry point on back lens element (scene side)
+    // Sample entry point on the back (scene-side) lens element
     int back_idx = scene.camera.num_lenses - 1;
     constant GPULensElement &back = scene.camera.lenses[back_idx];
     float lens_radius = back.radius;
@@ -1326,24 +1324,23 @@ kernel void flare_kernel(
     float3 dir = normalize(lens_point - glint_pos);
     float3 pos = lens_point;
 
-    // Weight
+    // Weight: irradiance at lens from point source
     float glint_dist = length(lens_point - glint_pos);
     float cos_angle = max(abs(dir.z), 0.1f);
-    float streak_boost = 2000.0;
+    float streak_boost = 1.0;
     float weight = spec_mult * cos_angle * M_PI_F * lens_radius * lens_radius
                    * streak_boost / (glint_dist * glint_dist * float(samples_per_light));
 
     float current_ri = 1.0;
-    int reflections = 0;
-    bool reflected_on_cylinder = false;
 
+    // Trace through ALL lens elements via pure transmission (no reflections)
     float z_front = scene.camera.lenses[0].z;
     float z_back = scene.camera.lenses[scene.camera.num_lenses - 1].z;
     float z_margin = abs(z_front - z_back) + 0.5;
     float z_max = max(z_front, z_back) + z_margin;
     float z_min = min(z_front, z_back) - z_margin;
 
-    for (int bounce = 0; bounce < FLARE_MAX_BOUNCES; bounce++) {
+    for (int bounce = 0; bounce < 32; bounce++) {
         if (weight < 1e-10) break;
 
         float nearest_t = 1e30;
@@ -1394,46 +1391,12 @@ kernel void flare_kernel(
         }
 
         if (nearest_elem < 0) {
-            // Ray exits lens — accumulate if reflected on cylinder at least once
-            if (dir.z > 0 && reflected_on_cylinder) {
-                float t_sensor = (scene.camera.cam_z - pos.z) / dir.z;
-                if (t_sensor > 0) {
-                    float3 sensor_hit = pos + t_sensor * dir;
-                    float aspect = float(width) / float(height);
-                    float px = 0.5 - sensor_hit.x / (2.0 * scene.camera.cam_d * aspect);
-                    float py = 0.5 - sensor_hit.y / (2.0 * scene.camera.cam_d);
-
-                    float fx = px * float(width) - 0.5;
-                    float fy = py * float(height) - 0.5;
-                    int ix0 = int(floor(fx));
-                    int iy0 = int(floor(fy));
-                    float sx = fx - float(ix0);
-                    float sy = fy - float(iy0);
-
-                    float3 spectral = wavelength_to_rgb(wavelength, spec_norm);
-                    float3 contribution = light_color * weight * spectral;
-
-                    for (int dy = 0; dy <= 1; dy++) {
-                        for (int dx = 0; dx <= 1; dx++) {
-                            int px_x = ix0 + dx;
-                            int px_y = iy0 + dy;
-                            if (px_x >= 0 && px_x < width && px_y >= 0 && px_y < height) {
-                                float wx = (dx == 0) ? (1.0 - sx) : sx;
-                                float wy = (dy == 0) ? (1.0 - sy) : sy;
-                                float w = wx * wy;
-                                int pidx = (px_y * width + px_x) * 3;
-                                atomic_fetch_add_explicit(&flare_buf[pidx + 0], contribution.r * w, memory_order_relaxed);
-                                atomic_fetch_add_explicit(&flare_buf[pidx + 1], contribution.g * w, memory_order_relaxed);
-                                atomic_fetch_add_explicit(&flare_buf[pidx + 2], contribution.b * w, memory_order_relaxed);
-                            }
-                        }
-                    }
-                }
-            }
-            break;
+            // Ray exits lens toward sensor
+            if (dir.z <= 0) break;
+            break;  // will handle sensor intersection below
         }
 
-        // Probabilistic Fresnel at surface
+        // Pure transmission: always refract, weight by transmittance
         bool entering = (current_ri < 1.01);
         float n1 = current_ri;
         float n2 = entering ? nearest_ri : 1.0;
@@ -1442,29 +1405,51 @@ kernel void flare_kernel(
         float surf_refl = scene.camera.lenses[nearest_elem].reflectance;
         fresnel_r = fresnel_r + surf_refl * (1.0 - fresnel_r);
 
-        float3 n = (dot(dir, nearest_normal) < 0) ? nearest_normal : -nearest_normal;
+        weight *= (1.0 - fresnel_r);
+        if (weight < 1e-10) break;
 
-        if (rng.uniform() < fresnel_r) {
-            // Reflect
-            dir = normalize(dir - 2.0 * dot(dir, n) * n);
-            pos = nearest_isect;
-            reflections++;
-            if (scene.camera.lenses[nearest_elem].anamorphic > 0.5)
-                reflected_on_cylinder = true;
-        } else {
-            // Refract
-            float eta = n1 / n2;
-            float3 refracted = refract(dir, n, eta);
-            if (length(refracted) < 0.001) {
-                dir = normalize(dir - 2.0 * dot(dir, n) * n);
-                pos = nearest_isect;
-                reflections++;
-                if (scene.camera.lenses[nearest_elem].anamorphic > 0.5)
-                    reflected_on_cylinder = true;
-            } else {
-                dir = refracted;
-                pos = nearest_isect;
-                current_ri = n2;
+        float3 n = (dot(dir, nearest_normal) < 0) ? nearest_normal : -nearest_normal;
+        float eta = n1 / n2;
+        float3 refracted = refract(dir, n, eta);
+        if (length(refracted) < 0.001) break;  // TIR → kill
+        dir = refracted;
+        pos = nearest_isect;
+        current_ri = n2;
+    }
+
+    if (weight < 1e-10 || dir.z <= 0) return;
+
+    float t_sensor = (scene.camera.cam_z - pos.z) / dir.z;
+    if (t_sensor <= 0) return;
+
+    float3 sensor_hit = pos + t_sensor * dir;
+    float aspect = float(width) / float(height);
+    float px = 0.5 - sensor_hit.x / (2.0 * scene.camera.cam_d * aspect);
+    float py = 0.5 - sensor_hit.y / (2.0 * scene.camera.cam_d);
+
+    // Bilinear splatting
+    float fx = px * float(width) - 0.5;
+    float fy = py * float(height) - 0.5;
+    int ix0 = int(floor(fx));
+    int iy0 = int(floor(fy));
+    float sx = fx - float(ix0);
+    float sy = fy - float(iy0);
+
+    float3 spectral = wavelength_to_rgb(wavelength, spec_norm);
+    float3 contribution = light_color * weight * spectral;
+
+    for (int dy = 0; dy <= 1; dy++) {
+        for (int dx = 0; dx <= 1; dx++) {
+            int px_x = ix0 + dx;
+            int px_y = iy0 + dy;
+            if (px_x >= 0 && px_x < width && px_y >= 0 && px_y < height) {
+                float wx = (dx == 0) ? (1.0 - sx) : sx;
+                float wy = (dy == 0) ? (1.0 - sy) : sy;
+                float w = wx * wy;
+                int pidx = (px_y * width + px_x) * 3;
+                atomic_fetch_add_explicit(&flare_buf[pidx + 0], contribution.r * w, memory_order_relaxed);
+                atomic_fetch_add_explicit(&flare_buf[pidx + 1], contribution.g * w, memory_order_relaxed);
+                atomic_fetch_add_explicit(&flare_buf[pidx + 2], contribution.b * w, memory_order_relaxed);
             }
         }
     }
