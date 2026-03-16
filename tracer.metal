@@ -1110,6 +1110,9 @@ kernel void ghost_kernel(
                 ghost_origin, ghost_dir);
 
             if (gw > 0.0001) {
+                // Find nearest sphere intersection
+                float nearest_t = 1e30;
+                int nearest_si = -1;
                 for (int si = 0; si < scene.num_spheres; si++) {
                     float3 sc = float3(scene.spheres[si].cx,
                                        scene.spheres[si].cy,
@@ -1120,7 +1123,18 @@ kernel void ghost_kernel(
                     float gc_disc = gb * gb - (dot(oc, oc) - sr * sr);
                     if (gc_disc <= 0) continue;
                     float gt = -gb - sqrt(gc_disc);
-                    if (gt < 0.001) continue;
+                    if (gt > 0.001 && gt < nearest_t) {
+                        nearest_t = gt;
+                        nearest_si = si;
+                    }
+                }
+                if (nearest_si >= 0) {
+                    int si = nearest_si;
+                    float gt = nearest_t;
+                    float3 sc = float3(scene.spheres[si].cx,
+                                       scene.spheres[si].cy,
+                                       scene.spheres[si].cz);
+                    float sr = scene.spheres[si].radius;
 
                     if (scene.spheres[si].emission >= 1.0) {
                         // Direct hit on emissive sphere
@@ -1150,18 +1164,15 @@ kernel void ghost_kernel(
                             float3 ec = float3(scene.spheres[ei].cx,
                                                scene.spheres[ei].cy,
                                                scene.spheres[ei].cz);
-                            float er = scene.spheres[ei].radius;
-                            float3 to_emissive = ec - hit_pt;
-                            float edist = length(to_emissive);
-                            to_emissive /= edist;
+                            float3 to_emissive = normalize(ec - hit_pt);
                             float alignment = dot(refl, to_emissive);
-                            // Angular radius of emissive sphere as seen from hit point
-                            float ang_radius = er / edist;
-                            if (alignment > (1.0 - ang_radius * ang_radius * 0.5)) {
+                            // Angular threshold for ghost generation
+                            if (alignment > 0.97) {
+                                float t = (alignment - 0.97) / 0.03;
                                 float3 gc = float3(scene.spheres[ei].color_r,
                                                    scene.spheres[ei].color_g,
                                                    scene.spheres[ei].color_b);
-                                gc *= scene.spheres[ei].emission * gw * fresnel;
+                                gc *= scene.spheres[ei].emission * gw * max(fresnel, 0.05f) * t;
                                 gc *= wavelength_to_rgb(wavelength, spec_norm);
                                 ghost_R += gc.r;
                                 ghost_G += gc.g;
