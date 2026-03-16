@@ -1333,7 +1333,7 @@ kernel void flare_kernel(
     // Source weight: solid angle of the lens aperture as seen from glint
     float glint_dist = length(lens_point - glint_pos);
     float cos_theta = max(abs(ray_dir.z), 0.1f);
-    float flare_boost = 300000.0;
+    float flare_boost = 250000.0;
     float source_weight = spec_mult * cos_theta * M_PI_F * lens_radius * lens_radius
                           * flare_boost / (glint_dist * glint_dist * float(samples_per_light));
 
@@ -1455,7 +1455,7 @@ kernel void flare_kernel(
             float2 perp = float2(-axis.y, axis.x);
 
             // Anisotropic scatter: wide along perpendicular (horizontal), narrow along axis
-            float scatter_perp = 0.50;  // spread perpendicular to cylinder axis
+            float scatter_perp = 0.70;  // spread perpendicular to cylinder axis
             float scatter_axis = 0.001;  // extremely narrow along cylinder axis
 
             // Generate scatter in the cylinder's local frame
@@ -1496,12 +1496,16 @@ kernel void flare_kernel(
     float sx = fx - float(ix0);
     float sy = fy - float(iy0);
 
-    // Streak color: use a blue-cyan coating model
-    // Real anamorphic coatings reflect predominantly in the blue-cyan band
-    // Apply a bandpass that peaks at 470nm and drops off for violet and green+
+    // Streak color: physically-derived blue-white from coating scatter
+    // Use spectral conversion but exclude violet wavelengths that cause purple
     float3 spectral = wavelength_to_rgb(wavelength, spec_norm);
-    float coating_peak = 490.0;
-    float coating_width = 50.0;
+    // Suppress red component from violet wavelengths that cause purple
+    // At 440nm and below, wavelength_to_rgb produces both R and B
+    // Zero out the R channel contribution from violet wavelengths
+    if (wavelength < 440.0) spectral.r = 0.0;
+    // Blue-white coating filter: peaks at 480nm, includes 440-550nm
+    float coating_peak = 480.0;
+    float coating_width = 55.0;
     float coating_r = exp(-0.5 * (wavelength - coating_peak) * (wavelength - coating_peak) / (coating_width * coating_width));
     float3 contribution = light_color * source_weight * weight * spectral * coating_r;
 
