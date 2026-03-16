@@ -7,7 +7,7 @@ camera z=0.5 d=0.50
 aperture z=-0.02 radius=0.04
 
 # Anamorphic cylinder (front element)
-lens z=0.000  r1=-0.8  r2=0.9   radius=0.15 cauchy_a=1.02 cauchy_b=0.02 reflectance=0.01 anamorphic=90
+lens z=0.000  r1=-0.8  r2=0.9   radius=0.15 cauchy_a=1.02 cauchy_b=0.02 reflectance=0.08 anamorphic=90
 # Petzval Group 1: crown biconvex + flint meniscus
 lens z=-0.015 r1=1.15  r2=1.15  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.03
 lens z=-0.027 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.05
@@ -34,5 +34,5 @@ light pos=-1,7,5 intensity=1.8
 light pos=7,-5,4 intensity=1.7
 light pos=-7,-5,1 intensity=1.8
 # Bright source behind camera for specular highlights + ghost rays
-sphere pos=4.5,-5,2.5 radius=0.05 color=1.0,1.0,1.0 emission=500000.0
+sphere pos=4.5,-5,2.5 radius=0.3 color=1.0,1.0,1.0 emission=500000.0
 light pos=4.5,-5,2.5 intensity=20.0 specular=10.0 diffuse=0.0

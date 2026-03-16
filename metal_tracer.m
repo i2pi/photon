@@ -463,71 +463,52 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             }
         }
 
-        // Dispatch source-driven ghost/streak system
-        if (ghost_rays && mtl_ghost_pipeline && mtl_detect_bright_pipeline) {
+        // Dispatch ghost kernel (real ray tracing through lens system)
+        if (ghost_rays && mtl_ghost_pipeline) {
             size_t ghost_size = sizeof(float) * width * height * 3;
             id<MTLBuffer> ghost_buf = [mtl_device newBufferWithLength:ghost_size
                                                                options:MTLResourceStorageModeShared];
             memset([ghost_buf contents], 0, ghost_size);
 
-            // Bright source detection buffers
-            id<MTLBuffer> bright_count_buf = [mtl_device newBufferWithLength:sizeof(int)
-                                                                     options:MTLResourceStorageModeShared];
-            memset([bright_count_buf contents], 0, sizeof(int));
+            NSUInteger gw = [mtl_ghost_pipeline threadExecutionWidth];
+            NSUInteger gh = [mtl_ghost_pipeline maxTotalThreadsPerThreadgroup] / gw;
+            MTLSize ghost_group = MTLSizeMake(gw, gh, 1);
 
-            size_t bright_src_size = sizeof(float) * 64 * 5;  // MAX_BRIGHT_SOURCES * 5
-            id<MTLBuffer> bright_src_buf = [mtl_device newBufferWithLength:bright_src_size
-                                                                   options:MTLResourceStorageModeShared];
-            memset([bright_src_buf contents], 0, bright_src_size);
+            id<MTLCommandBuffer> ghost_cmd = [mtl_queue commandBuffer];
+            id<MTLComputeCommandEncoder> ghost_enc = [ghost_cmd computeCommandEncoder];
+            [ghost_enc setComputePipelineState:mtl_ghost_pipeline];
+            [ghost_enc setBuffer:scene_buf offset:0 atIndex:0];
+            [ghost_enc setBuffer:output_buf offset:0 atIndex:1];
+            [ghost_enc setBuffer:ghost_buf offset:0 atIndex:2];
+            [ghost_enc dispatchThreads:grid threadsPerThreadgroup:ghost_group];
+            [ghost_enc endEncoding];
 
-            // Phase 1: Detect bright pixels
-            {
-                NSUInteger dw = [mtl_detect_bright_pipeline threadExecutionWidth];
-                NSUInteger dh = [mtl_detect_bright_pipeline maxTotalThreadsPerThreadgroup] / dw;
-                MTLSize detect_group = MTLSizeMake(dw, dh, 1);
+            struct timeval gs, ge;
+            gettimeofday(&gs, NULL);
+            [ghost_cmd commit];
+            [ghost_cmd waitUntilCompleted];
+            gettimeofday(&ge, NULL);
+            float ghost_ms = ((ge.tv_sec - gs.tv_sec) * 1000.0f +
+                             (ge.tv_usec - gs.tv_usec) / 1000.0f);
+            fprintf(stderr, "  ghost pass: %.1fms\n", ghost_ms);
 
-                id<MTLCommandBuffer> detect_cmd = [mtl_queue commandBuffer];
-                id<MTLComputeCommandEncoder> detect_enc = [detect_cmd computeCommandEncoder];
-                [detect_enc setComputePipelineState:mtl_detect_bright_pipeline];
-                [detect_enc setBuffer:scene_buf offset:0 atIndex:0];
-                [detect_enc setBuffer:output_buf offset:0 atIndex:1];
-                [detect_enc setBuffer:bright_count_buf offset:0 atIndex:2];
-                [detect_enc setBuffer:bright_src_buf offset:0 atIndex:3];
-                [detect_enc dispatchThreads:grid threadsPerThreadgroup:detect_group];
-                [detect_enc endEncoding];
-                [detect_cmd commit];
-                [detect_cmd waitUntilCompleted];
-
-                int *bc = (int *)[bright_count_buf contents];
-                fprintf(stderr, "  bright sources detected: %d\n", *bc);
+            // Ghost debug diagnostics
+            float *gb = (float *)[ghost_buf contents];
+            float total_exits = 0, total_hits = 0, total_contrib = 0;
+            float max_exits = 0, max_hits = 0, max_contrib = 0;
+            for (int i = 0; i < width * height; i++) {
+                float exits = gb[i*3+0];
+                float hits = gb[i*3+1];
+                float contrib = gb[i*3+2];
+                total_exits += exits;
+                total_hits += hits;
+                total_contrib += contrib;
+                if (exits > max_exits) max_exits = exits;
+                if (hits > max_hits) max_hits = hits;
+                if (contrib > max_contrib) max_contrib = contrib;
             }
-
-            // Phase 2: Streak kernel
-            {
-                NSUInteger gw = [mtl_ghost_pipeline threadExecutionWidth];
-                NSUInteger gh = [mtl_ghost_pipeline maxTotalThreadsPerThreadgroup] / gw;
-                MTLSize ghost_group = MTLSizeMake(gw, gh, 1);
-
-                id<MTLCommandBuffer> ghost_cmd = [mtl_queue commandBuffer];
-                id<MTLComputeCommandEncoder> ghost_enc = [ghost_cmd computeCommandEncoder];
-                [ghost_enc setComputePipelineState:mtl_ghost_pipeline];
-                [ghost_enc setBuffer:scene_buf offset:0 atIndex:0];
-                [ghost_enc setBuffer:output_buf offset:0 atIndex:1];
-                [ghost_enc setBuffer:ghost_buf offset:0 atIndex:2];
-                [ghost_enc setBuffer:bright_count_buf offset:0 atIndex:3];
-                [ghost_enc setBuffer:bright_src_buf offset:0 atIndex:4];
-                [ghost_enc dispatchThreads:grid threadsPerThreadgroup:ghost_group];
-                [ghost_enc endEncoding];
-
-                struct timeval gs, ge;
-                gettimeofday(&gs, NULL);
-                [ghost_cmd commit];
-                [ghost_cmd waitUntilCompleted];
-                gettimeofday(&ge, NULL);
-                float ghost_ms = ((ge.tv_sec - gs.tv_sec) * 1000.0f +
-                                 (ge.tv_usec - gs.tv_usec) / 1000.0f);
-                fprintf(stderr, "  ghost/streak pass: %.1fms\n", ghost_ms);
-            }
+            fprintf(stderr, "  ghost debug: exits=%.0f (max=%.0f) hits=%.0f (max=%.0f) contrib=%.4f (max=%.4f)\n",
+                    total_exits, max_exits, total_hits, max_hits, total_contrib, max_contrib);
         }
 
         // Read back and convert
