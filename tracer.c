@@ -563,12 +563,103 @@ void copy_ray (rayT *a, rayT *b) {
   b->refractive_index = a->refractive_index;
 }
 
+/*
+ * Intersect a ray with a sphere, returning both parametric roots.
+ * Returns 1 on hit, 0 on miss. t0 <= t1.
+ */
+static char ray_sphere_roots(vectorT *center, float radius, rayT *ray,
+                             float *t0, float *t1) {
+	vectorT L;
+	diff_vector(center, &ray->origin, &L);   // center - origin
+
+	float tca = dot_vector(&L, &ray->direction);
+	float d2  = dot_vector(&L, &L) - tca * tca;
+	float r2  = radius * radius;
+
+	if (d2 > r2) return 0;
+
+	float thc = sqrtf(r2 - d2);
+	*t0 = tca - thc;
+	*t1 = tca + thc;
+
+	return 1;
+}
+
+/*
+ * Intersect a ray with a lens surface (spherical cap).
+ *
+ * Sign convention:
+ *   Front surface (is_back=0):
+ *     signed_r > 0: convex toward camera, center at z - h
+ *     signed_r < 0: concave toward camera, center at z + h
+ *   Back surface (is_back=1):
+ *     signed_r > 0: convex toward scene, center at z + h
+ *     signed_r < 0: concave toward scene, center at z - h
+ *
+ * Picks the nearest valid forward intersection within the aperture.
+ * Returns outward-facing normal (toward incident medium).
+ */
+static char intersect_lens_surface(rayT *ray, float z, float signed_r, float R,
+                                   int is_back,
+                                   vectorT *hit, vectorT *normal) {
+	float r = fabsf(signed_r);
+	if (r <= R) return 0;
+
+	float h = sqrtf(r * r - R * R);
+	vectorT center;
+	center.x = 0;
+	center.y = 0;
+
+	if (!is_back)
+		center.z = (signed_r > 0) ? (z - h) : (z + h);
+	else
+		center.z = (signed_r > 0) ? (z + h) : (z - h);
+
+	float t0, t1;
+	if (!ray_sphere_roots(&center, r, ray, &t0, &t1)) return 0;
+
+	// Try both intersections, pick nearest valid one
+	float candidates[2] = {t0, t1};
+	int found = 0;
+	float best_t = 1e30f;
+
+	for (int i = 0; i < 2; i++) {
+		float t = candidates[i];
+		if (t <= 1e-5f) continue;
+
+		vectorT pt;
+		scale_offset_vector(&ray->origin, &ray->direction, t, &pt);
+
+		// Aperture check
+		if (pt.x * pt.x + pt.y * pt.y > R * R)
+			continue;
+
+		if (t < best_t) {
+			best_t = t;
+			*hit = pt;
+			found = 1;
+		}
+	}
+
+	if (!found) return 0;
+
+	// Outward normal from sphere center
+	diff_vector(hit, &center, normal);
+	normalize_vector(normal);
+
+	// Ensure normal faces the incident medium (opposes ray direction)
+	if (dot_vector(&ray->direction, normal) > 0.0f) {
+		normal->x = -normal->x;
+		normal->y = -normal->y;
+		normal->z = -normal->z;
+	}
+
+	return 1;
+}
+
 char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
-	float	sphere_parameter[4];
 	vectorT	normal;
 	vectorT	intersection;
-	char	hit;
-	float 	dist;
 
 	float	z, r1, r2, R;
 	float	ri;
@@ -579,50 +670,30 @@ char	ray_through_lens (rayT *ray, lensT *lens, rayT *out) {
 	R = lens->radius;
 	ri = cauchy_ri(lens->cauchy_a, lens->cauchy_b, ray->wavelength);
 
-	// Coming in to the front of the lens
-	if (ray->origin.z < z) return(0);
-	if (ray->direction.z > 0) return (0);	// Wong ray.
-
-	sphere_parameter[0] = 0; 	// center.x
-	sphere_parameter[1] = 0;	// center.y
-	sphere_parameter[2] = z - sqrt(powf(r1, 2.0f) - powf(R,2.0f));
-	sphere_parameter[3] = r1;
-
-	hit = ray_sphere_intersection (sphere_parameter, ray, &intersection);
-	if (!hit) return (0);
-
-	// Check that the intersection is on the section of the sphere that is the cap of the lens
-	dist = sqrt(powf(intersection.x, 2.0f) + powf(intersection.y, 2.0f));
-	if (dist > R) return (0);
-
-	// Refract
-	out->origin = intersection;
-	sphere_normal(sphere_parameter, &intersection, &normal);
-	refract_vector(&ray->direction, &normal, 1, ri, &out->direction);
-
-
-	// Pass the light through the back of the lens
-
-	sphere_parameter[0] = 0; 	// center.x
-	sphere_parameter[1] = 0;	// center.y
-	sphere_parameter[2] = z + sqrt(powf(r2, 2.0f) - powf(R,2.0f));
-	sphere_parameter[3] = r2;
-
-	hit = ray_sphere_intersection (sphere_parameter, out, &intersection);
-	if (!hit)  {
-    // TODO - this happens often!
-		printf ("ODD\n");
-		return (0);
-	}
+	// Front surface: air -> glass
+	if (!intersect_lens_surface(ray, z, r1, R, 0, &intersection, &normal))
+		return 0;
 
 	out->origin = intersection;
-	sphere_normal(sphere_parameter, &intersection, &normal);
-	normal.x *= -1.0;
-	normal.y *= -1.0;
-	normal.z *= -1.0;
-	refract_vector(&out->direction, &normal, ri, 1, &out->direction);
+	if (!refract_vector(&ray->direction, &normal, 1.0f, ri, &out->direction))
+		return 0;
 
-  out->refractive_index = 1.0;
+	// Back surface: glass -> air
+	rayT inside;
+	inside.origin = intersection;
+	inside.direction = out->direction;
+	inside.wavelength = ray->wavelength;
+	inside.refractive_index = ri;
+
+	if (!intersect_lens_surface(&inside, z, r2, R, 1, &intersection, &normal))
+		return 0;
+
+	out->origin = intersection;
+	if (!refract_vector(&inside.direction, &normal, ri, 1.0f, &out->direction))
+		return 0;
+
+	out->refractive_index = 1.0;
+	out->wavelength = ray->wavelength;
 
 	return (1);
 }
@@ -633,17 +704,32 @@ char	ray_lens_intersection (float *parameter, rayT *ray, vectorT *intersection) 
 
 char	cast_ray_through_camera(rayT *ray, cameraT *camera, rayT *out) {
 	int		i;
-	char	hit;
+	rayT	cur, next;
+
+	cur = *ray;
 
 	for (i=0; i<camera->lenses; i++) {
-		hit = ray_through_lens (ray, &camera->lens[i], out);
+		if (!ray_through_lens(&cur, &camera->lens[i], &next))
+			return 0;
 #ifndef NO_GL
-		add_seg_to_display_buffer(&ray->origin, &out->origin, 1, 0, 0);
+		add_seg_to_display_buffer(&cur.origin, &next.origin, 1, 0, 0);
 #endif
-		// TODO: lens barrel
-		if (!hit) return (0);
+		cur = next;
 	}
 
+	// Check aperture stop
+	if (camera->aperture_radius > 0) {
+		if (fabsf(cur.direction.z) > 1e-10f) {
+			float t = (camera->aperture_z - cur.origin.z) / cur.direction.z;
+			vectorT ap_pt;
+			scale_offset_vector(&cur.origin, &cur.direction, t, &ap_pt);
+			float r2 = ap_pt.x * ap_pt.x + ap_pt.y * ap_pt.y;
+			if (r2 > camera->aperture_radius * camera->aperture_radius)
+				return 0;
+		}
+	}
+
+	*out = cur;
 	return (1);
 }
 

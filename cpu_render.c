@@ -106,7 +106,7 @@ static char single_ray_trace_to_sensor (sceneT *scene, int width, int height, in
     float wavelength = 380.0 + 400.0 * (random() / (float) RAND_MAX);
     ray.wavelength = wavelength;
 
-    sample_circle(0.05, &p.x, &p.y);
+    sample_circle(scene->camera.lens[0].radius, &p.x, &p.y);
     p.z = scene->camera.lens[0].z;
 
   	diff_vector(&p, &ray.origin, &ray.direction);
@@ -116,8 +116,6 @@ static char single_ray_trace_to_sensor (sceneT *scene, int width, int height, in
 
   	hit = cast_ray_through_camera (&ray, &scene->camera, &camera_ray);
   	if (!hit) {
-     // TODO: This happens :)
-  	  printf ("this should never happen\n");
      continue;
   	}
 
