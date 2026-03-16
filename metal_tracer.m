@@ -335,7 +335,7 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             gpu_scene.camera.lenses[i].back_center_z = lens->z + sign2 * sqrtf(abs_r2 * abs_r2 - lens->radius * lens->radius);
         }
 
-        // Precompute valid ghost pairs (only those involving anamorphic elements)
+        // Precompute ghost pairs: all pairs involving anamorphic elements
         gpu_scene.camera.num_ghost_pairs = 0;
         int num_surfaces = gpu_scene.camera.num_lenses * 2;
         for (int s1 = 1; s1 < num_surfaces; s1++) {
@@ -350,6 +350,7 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
                 }
             }
         }
+        fprintf(stderr, "Ghost pairs: %d\n", gpu_scene.camera.num_ghost_pairs);
 
         // Pack objects: separate spheres and planes
         // (skip lens objects)

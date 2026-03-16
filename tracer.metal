@@ -1061,7 +1061,7 @@ kernel void trace_kernel(
 // Ghost rays that exit the lens intersect the scene to find emissive sources
 // and specular glints on glass surfaces.
 
-#define GHOST_SAMPLES 64
+#define GHOST_SAMPLES 128
 
 kernel void ghost_kernel(
     constant GPUScene &scene [[buffer(0)]],
@@ -1197,9 +1197,14 @@ kernel void ghost_kernel(
                         ghost_contrib += surf_color * surf.emission;
                     }
 
-                    // Direct lighting evaluation — same as trace_ray
-                    // Skip lens elements (is_lens flag)
+                    // Direct lighting: specular-only for ghost contribution
+                    // Use the ghost ray's incoming direction (not canonical view)
+                    // so the ghost image shows glints at DISPLACED positions
                     if (surf.is_lens < 0.5) {
+                        // Ghost ray view direction: where the ghost ray came from
+                        float3 ghost_view = -ghost_dir;
+                        float3 refl_view = reflect(-ghost_view, normal);
+
                         for (int li = 0; li < scene.num_lights; li++) {
                             float3 lp = float3(scene.lights[li].px,
                                                scene.lights[li].py,
@@ -1208,36 +1213,20 @@ kernel void ghost_kernel(
                                                scene.lights[li].color_g,
                                                scene.lights[li].color_b);
 
-                            float3 incidence = lp - hit_point;
-                            float light_dist = length(incidence);
-                            incidence = normalize(incidence);
+                            float3 incidence = normalize(lp - hit_point);
+                            float light_dist = length(lp - hit_point);
+                            float refl_cos = dot(refl_view, incidence);
 
-                            float diffuse = max(dot(normal, incidence), 0.0f);
-
-                            // Specular: use canonical view direction
-                            float3 canonical_view = normalize(hit_point - float3(0, 0, scene.camera.cam_z));
-                            float3 refl_view = canonical_view - 2.0 * dot(canonical_view, normal) * normal;
-                            float3 to_light = incidence;
-                            float refl_cos = dot(refl_view, to_light);
-
-                            // Fresnel
-                            float n_ior = surf.cauchy_a;
-                            float f0 = ((n_ior - 1.0) / (n_ior + 1.0)) * ((n_ior - 1.0) / (n_ior + 1.0));
-                            float cos_i = max(dot(normal, to_light), 0.0f);
-                            float fresnel = f0 + (1.0 - f0) * pow(1.0 - cos_i, 5.0);
-
-                            float atten = 1.0 / (1.0 + light_dist * 0.0001);
-
-                            // Diffuse term
-                            float diff_term = (1.0 - surf.transparency) * diffuse * 0.9 * scene.lights[li].diffuse_mult;
-                            ghost_contrib += diff_term * surf_color * lc * atten;
-
-                            // Specular/glint term
                             float spec_mult = scene.lights[li].specular;
-                            if (surf.phong > 1.0 && refl_cos > 0) {
+                            if (surf.phong > 1.0 && refl_cos > 0 && spec_mult > 0) {
                                 float glint_size = 1.0 / surf.phong;
                                 if (refl_cos > (1.0 - glint_size)) {
                                     float t_val = (refl_cos - (1.0 - glint_size)) / glint_size;
+                                    float n_ior = surf.cauchy_a;
+                                    float f0 = ((n_ior - 1.0) / (n_ior + 1.0)) * ((n_ior - 1.0) / (n_ior + 1.0));
+                                    float cos_i = max(dot(normal, incidence), 0.0f);
+                                    float fresnel = f0 + (1.0 - f0) * pow(1.0 - cos_i, 5.0);
+                                    float atten = 1.0 / (1.0 + light_dist * 0.0001);
                                     float spec_term = t_val * t_val * fresnel * spec_mult;
                                     ghost_contrib += spec_term * lc * atten;
                                     debug_glint_hits += 1.0;
@@ -1256,15 +1245,19 @@ kernel void ghost_kernel(
         }
     }
 
-    // Debug: R=emissive_hits+glint_hits, G=max_gw, B=total ghost contribution
+    // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
+    // ghost_boost compensates for physically perfect AR coatings that 
+    // suppress ghost reflections more than desired artistically
     float ginv = 1.0 / float(GHOST_SAMPLES);
+    float ghost_boost = 15.0;
+
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
     ghost_buf[gidx + 1] = debug_max_gw;
     ghost_buf[gidx + 2] = ghost_R + ghost_G + ghost_B;
 
     // Add ghost to main output
-    output[gidx + 0] += ghost_R * ginv;
-    output[gidx + 1] += ghost_G * ginv;
-    output[gidx + 2] += ghost_B * ginv;
+    output[gidx + 0] += ghost_R * ginv * ghost_boost;
+    output[gidx + 1] += ghost_G * ginv * ghost_boost;
+    output[gidx + 2] += ghost_B * ginv * ghost_boost;
 }
