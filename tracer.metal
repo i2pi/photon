@@ -505,7 +505,7 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
             return false;
         }
 
-        if (cam.lenses[nearest_elem].cauchy_b > 0.02)
+        if (cam.lenses[nearest_elem].cauchy_b > 0.005)
             hit_dispersive = true;
 
         // Determine entering/exiting by current medium, not geometry
@@ -849,7 +849,7 @@ float3 trace_ray(float3 origin, float3 direction,
             if (dot(op, rough_normal) < 0) {
                 // Outside surface
                 float surf_ri = cauchy_ri(surf.cauchy_a, surf.cauchy_b, wavelength);
-                if (surf.cauchy_b > 0.02) hit_dispersive = true;
+                if (surf.cauchy_b > 0.005) hit_dispersive = true;
                 float eta = ray_ri / surf_ri;
                 refracted = refract(ray_dir, rough_normal, eta);
                 if (length(refracted) > 0.001) {
@@ -1251,7 +1251,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 12.0;
+    float ghost_boost = 8.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
