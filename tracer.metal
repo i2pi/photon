@@ -1061,7 +1061,7 @@ kernel void trace_kernel(
 // Ghost rays that exit the lens intersect the scene to find emissive sources
 // and specular glints on glass surfaces.
 
-#define GHOST_SAMPLES 256
+#define GHOST_SAMPLES 512
 
 kernel void ghost_kernel(
     constant GPUScene &scene [[buffer(0)]],
