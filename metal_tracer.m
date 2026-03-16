@@ -523,7 +523,7 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
                                                               options:MTLResourceStorageModeShared];
             memset([flare_buf contents], 0, flare_size);
 
-            int samples_per_light = 1048576;  // must match tracer.metal
+            int samples_per_light = 4194304;  // must match tracer.metal
             int total_flare_threads = gpu_scene.num_lights * samples_per_light;
 
             NSUInteger fw = [mtl_flare_pipeline threadExecutionWidth];

@@ -1240,7 +1240,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 3.0;
+    float ghost_boost = 0.5;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
@@ -1271,7 +1271,7 @@ kernel void flare_kernel(
     if (scene.camera.num_lenses <= 0) return;
 
     int total_lights = scene.num_lights;
-    int samples_per_light = 1048576;  // 1M samples per light for smooth flare coverage
+    int samples_per_light = 4194304;  // 4M samples per light for smooth flare coverage
     int total_samples = total_lights * samples_per_light;
     if ((int)tid >= total_samples) return;
 
@@ -1318,7 +1318,7 @@ kernel void flare_kernel(
     float cos_angle = max(abs(to_lens.z), 0.1f);
     // Flare boost: real flares are visible because of high source brightness
     // and sensor integration time. Scale up to make visible in our render.
-    float flare_boost = 50000.0;
+    float flare_boost = 80000.0;
     float weight = spec_mult * cos_angle * M_PI_F * lens_radius * lens_radius
                    * flare_boost / (light_dist * light_dist * float(samples_per_light));
 
