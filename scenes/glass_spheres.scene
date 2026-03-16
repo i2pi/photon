@@ -1,10 +1,10 @@
 # Glass spheres scene — pink sphere with nested glass shells
 # 3-element lens: crown biconvex, anamorphic cylinder, flint meniscus
 
-#render width=256 height=256 min_samples=16 max_samples=4000 qual_thresh=0.1 trace_depth=32 shadow_rays=0 ghost_rays=1
-render width=1024 height=1024 min_samples=16 max_samples=4000 qual_thresh=0.01 trace_depth=32 shadow_rays=0 ghost_rays=1
+render width=512 height=512 min_samples=16 max_samples=1000 qual_thresh=0.02 trace_depth=32 shadow_rays=0 ghost_rays=1
 
 camera z=0.5 d=0.50
+aperture z=-0.02 radius=0.015
 
 # Anamorphic cylinder (front element)
 lens z=0.000  r1=-0.8  r2=0.9   radius=0.15 cauchy_a=1.02 cauchy_b=0.02 reflectance=0.01 anamorphic=90
@@ -26,8 +26,8 @@ sphere pos=-0.0760,0.0,-3.05 radius=1.4722 color=0.5,0.75,0.75 transparency=0.99
 sphere pos=-0.1486,0.0,-3.05 radius=1.0780 color=0.5,0.75,0.75 transparency=0.970 cauchy_a=1.2477 cauchy_b=0.0 
 sphere pos=-0.2274,0.0,-3.05 radius=1.2816 color=0.5,0.75,0.75 transparency=1.0 cauchy_a=1.2347 cauchy_b=0.03
 
-# Background plane — bright
-plane normal=0,0,1 d=-800 color=0.95,0.97,0.96 reflectance=0.2 roughness=0.5
+# Background plane — emissive white backlight
+plane normal=0,0,1 d=-800 color=1.0,1.0,1.0 emission=2.0 reflectance=0.0 roughness=0.0
 
 # Bright point source for flares — inside FOV, near edge of glass shells
 sphere pos=1.0,0.3,-2.5 radius=0.10 color=1.0,1.0,1.0 emission=80.0

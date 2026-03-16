@@ -171,9 +171,12 @@ sceneT *load_scene(const char *filename, render_settingsT *settings) {
 			float trans = get_kv_float(tokens, n, "transparency", 0.0);
 			float ca    = get_kv_float(tokens, n, "cauchy_a", 1.0);
 			float cb    = get_kv_float(tokens, n, "cauchy_b", 0.0);
+			float emit  = get_kv_float(tokens, n, "emission", 0.0);
 
 			objectT *obj = create_ortho_plane_object(nx, ny, nz, d);
 			color_object(obj, color, refl, rough, trans, ca, cb);
+			for (int si = 0; si < obj->surfaces; si++)
+				obj->surface[si].properties.emission = emit;
 			add_object_to_scene(s, obj);
 
 		} else if (strcmp(cmd, "light") == 0) {
