@@ -1249,7 +1249,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 0.0;
+    float ghost_boost = 5.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
@@ -1332,7 +1332,7 @@ kernel void flare_kernel(
     // Source weight: solid angle of the lens aperture as seen from glint
     float glint_dist = length(lens_point - glint_pos);
     float cos_theta = max(abs(ray_dir.z), 0.1f);
-    float flare_boost = 15000.0;
+    float flare_boost = 80000.0;
     float source_weight = spec_mult * cos_theta * M_PI_F * lens_radius * lens_radius
                           * flare_boost / (glint_dist * glint_dist * float(samples_per_light));
 
@@ -1454,7 +1454,7 @@ kernel void flare_kernel(
             float2 perp = float2(-axis.y, axis.x);
 
             // Anisotropic scatter: wide along perpendicular (horizontal), narrow along axis
-            float scatter_perp = 0.25;  // spread perpendicular to cylinder axis
+            float scatter_perp = 0.40;  // spread perpendicular to cylinder axis
             float scatter_axis = 0.003;  // very narrow along cylinder axis
 
             // Generate scatter in the cylinder's local frame
@@ -1495,8 +1495,14 @@ kernel void flare_kernel(
     float sx = fx - float(ix0);
     float sy = fy - float(iy0);
 
+    // Streak color: use a blue-cyan coating model
+    // Real anamorphic coatings reflect predominantly in the blue-cyan band
+    // Apply a bandpass that peaks at 470nm and drops off for violet and green+
     float3 spectral = wavelength_to_rgb(wavelength, spec_norm);
-    float3 contribution = light_color * source_weight * weight * spectral;
+    float coating_peak = 475.0;
+    float coating_width = 80.0;
+    float coating_r = exp(-0.5 * (wavelength - coating_peak) * (wavelength - coating_peak) / (coating_width * coating_width));
+    float3 contribution = light_color * source_weight * weight * spectral * coating_r;
 
     for (int dy = 0; dy <= 1; dy++) {
         for (int dx = 0; dx <= 1; dx++) {
