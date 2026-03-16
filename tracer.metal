@@ -1299,9 +1299,9 @@ kernel void flare_kernel(
     float3 spec_norm = float3(scene.spec_norm_r, scene.spec_norm_g, scene.spec_norm_b);
     float wavelength = 380.0 + 400.0 * fract(float(sample_idx) * 0.6180339887 + rng.uniform());
 
-    // Compute glint position on outermost glass sphere
+    // Find the outermost glass sphere for glint computation
     float3 best_center = float3(0, 0, -3.0);
-    float best_radius = 1.5;
+    float best_radius = 0.0;
     for (int si = 0; si < scene.num_spheres; si++) {
         if (scene.spheres[si].phong > 100 && scene.spheres[si].transparency > 0.5) {
             if (scene.spheres[si].radius > best_radius) {
@@ -1310,6 +1310,7 @@ kernel void flare_kernel(
             }
         }
     }
+    if (best_radius < 0.01) return;
 
     float3 cam_pos = float3(0, 0, scene.camera.cam_z);
     float3 glint_pos = best_center + best_radius * normalize(cam_pos - best_center);
@@ -1332,7 +1333,7 @@ kernel void flare_kernel(
     // Source weight: solid angle of the lens aperture as seen from glint
     float glint_dist = length(lens_point - glint_pos);
     float cos_theta = max(abs(ray_dir.z), 0.1f);
-    float flare_boost = 80000.0;
+    float flare_boost = 150000.0;
     float source_weight = spec_mult * cos_theta * M_PI_F * lens_radius * lens_radius
                           * flare_boost / (glint_dist * glint_dist * float(samples_per_light));
 
@@ -1454,8 +1455,8 @@ kernel void flare_kernel(
             float2 perp = float2(-axis.y, axis.x);
 
             // Anisotropic scatter: wide along perpendicular (horizontal), narrow along axis
-            float scatter_perp = 0.40;  // spread perpendicular to cylinder axis
-            float scatter_axis = 0.003;  // very narrow along cylinder axis
+            float scatter_perp = 0.50;  // spread perpendicular to cylinder axis
+            float scatter_axis = 0.001;  // extremely narrow along cylinder axis
 
             // Generate scatter in the cylinder's local frame
             float u1 = rng.uniform() * 2.0 - 1.0;  // uniform [-1,1]
@@ -1499,8 +1500,8 @@ kernel void flare_kernel(
     // Real anamorphic coatings reflect predominantly in the blue-cyan band
     // Apply a bandpass that peaks at 470nm and drops off for violet and green+
     float3 spectral = wavelength_to_rgb(wavelength, spec_norm);
-    float coating_peak = 475.0;
-    float coating_width = 80.0;
+    float coating_peak = 490.0;
+    float coating_width = 50.0;
     float coating_r = exp(-0.5 * (wavelength - coating_peak) * (wavelength - coating_peak) / (coating_width * coating_width));
     float3 contribution = light_color * source_weight * weight * spectral * coating_r;
 
