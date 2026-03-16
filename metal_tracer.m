@@ -494,21 +494,15 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
 
             // Ghost debug diagnostics
             float *gb = (float *)[ghost_buf contents];
-            float total_exits = 0, total_hits = 0, total_contrib = 0;
-            float max_exits = 0, max_hits = 0, max_contrib = 0;
+            float total_emissive = 0, max_gw = 0, total_contrib = 0, max_contrib = 0;
             for (int i = 0; i < width * height; i++) {
-                float exits = gb[i*3+0];
-                float hits = gb[i*3+1];
-                float contrib = gb[i*3+2];
-                total_exits += exits;
-                total_hits += hits;
-                total_contrib += contrib;
-                if (exits > max_exits) max_exits = exits;
-                if (hits > max_hits) max_hits = hits;
-                if (contrib > max_contrib) max_contrib = contrib;
+                total_emissive += gb[i*3+0];
+                if (gb[i*3+1] > max_gw) max_gw = gb[i*3+1];
+                total_contrib += gb[i*3+2];
+                if (gb[i*3+2] > max_contrib) max_contrib = gb[i*3+2];
             }
-            fprintf(stderr, "  ghost debug: exits=%.0f (max=%.0f) hits=%.0f (max=%.0f) contrib=%.4f (max=%.4f)\n",
-                    total_exits, max_exits, total_hits, max_hits, total_contrib, max_contrib);
+            fprintf(stderr, "  ghost debug: emissive_hits=%.0f max_gw=%.6f contrib=%.4f (max=%.4f)\n",
+                    total_emissive, max_gw, total_contrib, max_contrib);
         }
 
         // Read back and convert

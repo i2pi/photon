@@ -1098,8 +1098,11 @@ kernel void ghost_kernel(
     float pixel_rand_w = pixel_rng.uniform();
 
     float ghost_R = 0, ghost_G = 0, ghost_B = 0;
-    float debug_exits = 0;  // count successful ghost ray exits
-    float debug_hits = 0;   // count scene intersections
+    float debug_exits = 0;
+    float debug_hits = 0;
+    float debug_emissive_hits = 0;
+    float debug_glint_hits = 0;
+    float debug_max_gw = 0;
 
     for (int i = 0; i < GHOST_SAMPLES; i++) {
         float wavelength = 380.0 + 400.0 * fract(float(i) * 0.6180339887 + pixel_rand_w);
@@ -1114,8 +1117,9 @@ kernel void ghost_kernel(
                 scene.camera, wavelength, s1, s2,
                 ghost_origin, ghost_dir);
 
-            if (gw > 0.0001) {
+            if (gw > 1e-7) {
                 debug_exits += 1.0;
+                debug_max_gw = max(debug_max_gw, gw);
                 // Find nearest sphere intersection
                 float nearest_t = 1e30;
                 int nearest_si = -1;
@@ -1143,6 +1147,7 @@ kernel void ghost_kernel(
                                        scene.spheres[si].cz);
 
                     if (scene.spheres[si].emission >= 1.0) {
+                        debug_emissive_hits += 1.0;
                         // Direct hit on emissive sphere
                         float3 gc = float3(scene.spheres[si].color_r,
                                            scene.spheres[si].color_g,
@@ -1197,12 +1202,11 @@ kernel void ghost_kernel(
         }
     }
 
-    // Write ghost average to ghost buffer
-    // Debug: R=exits, G=hits, B=ghost contribution
+    // Debug: R=emissive_hits, G=max_gw, B=total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
     int gidx = pixel_idx * 3;
-    ghost_buf[gidx + 0] = debug_exits;
-    ghost_buf[gidx + 1] = debug_hits;
+    ghost_buf[gidx + 0] = debug_emissive_hits;
+    ghost_buf[gidx + 1] = debug_max_gw;
     ghost_buf[gidx + 2] = ghost_R + ghost_G + ghost_B;
 
     // Add ghost to main output
