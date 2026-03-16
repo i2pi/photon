@@ -813,7 +813,8 @@ float3 trace_ray(float3 origin, float3 direction,
                     spec_term = t * t * fresnel * effective_mult;
                 }
 
-                float diff_term = (1.0 - surf.transparency) * diffuse * 0.9 * scene.lights[i].diffuse_mult;
+                float opacity = 1.0 - surf.transparency;
+                float diff_term = opacity * opacity * diffuse * 0.9 * scene.lights[i].diffuse_mult;
 
                 float3 lc = float3(light_color.r, light_color.g, light_color.b);
                 float atten = 1.0 / (1.0 + light_dist * 0.0001);
@@ -1454,15 +1455,15 @@ kernel void flare_kernel(
             // Perpendicular to axis = direction of curvature = wider scatter
             float2 perp = float2(-axis.y, axis.x);
 
-            // Anisotropic scatter: wide along perpendicular (horizontal), narrow along axis
-            float scatter_perp = 0.70;  // spread perpendicular to cylinder axis
+            // Anisotropic scatter: moderate along perpendicular (horizontal), narrow along axis
+            float scatter_perp = 0.05;  // spread perpendicular to cylinder axis
             float scatter_axis = 0.001;  // extremely narrow along cylinder axis
 
             // Generate scatter in the cylinder's local frame
             float u1 = rng.uniform() * 2.0 - 1.0;  // uniform [-1,1]
             float u2 = rng.uniform() * 2.0 - 1.0;
-            // Cauchy distribution for heavy tails (produces 1/(1+x^2) falloff)
-            float scatter_x = scatter_perp * tan(u1 * M_PI_F * 0.49);
+            // Cauchy distribution with clamp for controlled tails
+            float scatter_x = clamp(scatter_perp * tan(u1 * M_PI_F * 0.49f), -0.15f, 0.15f);
             float scatter_y = scatter_axis * (u2 * u2 * u2);  // narrow
 
             // Convert to world X-Y perturbation
@@ -1496,18 +1497,18 @@ kernel void flare_kernel(
     float sx = fx - float(ix0);
     float sy = fy - float(iy0);
 
-    // Streak color: physically-derived blue-white from coating scatter
-    // Use spectral conversion but exclude violet wavelengths that cause purple
+    // Streak color: spectral weighting with coating scatter physics
+    // Anti-reflection coatings on anamorphic elements scatter blue/cyan light
+    // more efficiently — this is a physical property of the coating, modeled as
+    // wavelength-dependent scatter efficiency at the cylindrical surface
     float3 spectral = wavelength_to_rgb(wavelength, spec_norm);
-    // Suppress red component from violet wavelengths that cause purple
-    // At 440nm and below, wavelength_to_rgb produces both R and B
-    // Zero out the R channel contribution from violet wavelengths
-    if (wavelength < 440.0) spectral.r = 0.0;
-    // Blue-white coating filter: peaks at 480nm, includes 440-550nm
-    float coating_peak = 480.0;
-    float coating_width = 55.0;
-    float coating_r = exp(-0.5 * (wavelength - coating_peak) * (wavelength - coating_peak) / (coating_width * coating_width));
-    float3 contribution = light_color * source_weight * weight * spectral * coating_r;
+    // Suppress violet red leakage (wavelength_to_rgb returns R+B for <440nm)
+    if (wavelength < 440.0) spectral.r *= 0.05;
+    // Coating scatter efficiency: peaks at ~475nm (blue-cyan), FWHM ~70nm
+    float coating_scatter = exp(-0.5 * (wavelength - 475.0) * (wavelength - 475.0) / (70.0 * 70.0));
+    // Mix: mostly coating-scattered blue + a little broadband white
+    float scatter_weight = 0.80 * coating_scatter + 0.20;
+    float3 contribution = light_color * source_weight * weight * spectral * scatter_weight;
 
     for (int dy = 0; dy <= 1; dy++) {
         for (int dx = 0; dx <= 1; dx++) {
