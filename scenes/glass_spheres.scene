@@ -1,13 +1,13 @@
 # Glass spheres scene — pink sphere with nested glass shells
 # 3-element lens: crown biconvex, anamorphic cylinder, flint meniscus
 
-render width=512 height=512 min_samples=512 max_samples=4000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=1 exposure=0.20 contrast=1.30
+render width=512 height=512 min_samples=512 max_samples=4000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=1 exposure=0.12 contrast=1.50
 
 camera z=0.595 d=0.455
 aperture z=-0.026 radius=0.006
 
 # Front anamorphic cylinder: dominant flare source, dispersive
-lens z=0.000  r1=-0.60  r2=0.65  radius=0.25 cauchy_a=1.30 cauchy_b=0.025 reflectance=0.30 anamorphic=1
+lens z=0.000  r1=-0.35  r2=0.40  radius=0.25 cauchy_a=1.30 cauchy_b=0.025 reflectance=0.30 anamorphic=1
 # Petzval Group 1: low-reflection crown + low-dispersion flint
 lens z=-0.018 r1=0.92  r2=0.98  radius=0.22 cauchy_a=1.53 cauchy_b=0.006 reflectance=0.018
 lens z=-0.029 r1=-1.35 r2=1.95  radius=0.22 cauchy_a=1.64 cauchy_b=0.014 reflectance=0.10

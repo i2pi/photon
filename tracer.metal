@@ -1243,7 +1243,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 0.00005;
+    float ghost_boost = 0.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
@@ -1274,7 +1274,7 @@ kernel void flare_kernel(
     if (scene.camera.num_lenses <= 0) return;
 
     int total_lights = scene.num_lights;
-    int samples_per_light = 8388608;  // 8M samples per light for smooth flare coverage
+    int samples_per_light = 67108864;  // 64M samples per light for smooth flare coverage
     int total_samples = total_lights * samples_per_light;
     if ((int)tid >= total_samples) return;
 
@@ -1321,7 +1321,7 @@ kernel void flare_kernel(
     float cos_angle = max(abs(to_lens.z), 0.1f);
     // Flare boost: real flares are visible because of high source brightness
     // and sensor integration time. Scale up to make visible in our render.
-    float flare_boost = 200000.0;
+    float flare_boost = 0.0;  // disabled for debugging
     float weight = spec_mult * cos_angle * M_PI_F * lens_radius * lens_radius
                    * flare_boost / (light_dist * light_dist * float(samples_per_light));
 
@@ -1333,10 +1333,11 @@ kernel void flare_kernel(
     float z_max = max(z_front, z_back) + z_margin;
     float z_min = min(z_front, z_back) - z_margin;
 
-    // Track reflections: require at least one on the anamorphic cylinder (element 0)
+    // Track reflections: require ONLY on the anamorphic cylinder (element 0)
     // to produce horizontal streaks rather than circular blobs from spherical elements
     int reflections = 0;
     bool reflected_on_cylinder = false;
+    bool reflected_on_spherical = false;
 
     for (int bounce = 0; bounce < FLARE_MAX_BOUNCES; bounce++) {
         if (weight < 1e-8) break;
@@ -1403,9 +1404,9 @@ kernel void flare_kernel(
 
         if (nearest_elem < 0) {
             // Ray exits lens system
-            // Only accumulate if reflected at least once on the anamorphic cylinder
-            // This ensures streaks come from cylindrical optics, not spherical blob ghosts
-            if (dir.z > 0 && reflections > 0 && reflected_on_cylinder) {
+            // Only accumulate if reflected ONLY on the anamorphic cylinder
+            // (no spherical element reflections) to get clean streaks
+            if (dir.z > 0 && reflected_on_cylinder && !reflected_on_spherical) {
                 // Intersect with sensor plane at z = cam_z
                 float t_sensor = (scene.camera.cam_z - pos.z) / dir.z;
                 if (t_sensor > 0) {
@@ -1419,14 +1420,32 @@ kernel void flare_kernel(
                     int ix = int(px * float(width));
                     int iy = int(py * float(height));
 
-                    if (ix >= 0 && ix < width && iy >= 0 && iy < height) {
-                        float3 spectral = wavelength_to_rgb(wavelength, spec_norm);
-                        float3 contribution = light_color * weight * spectral;
+                    // Bilinear splatting: distribute contribution to 4 neighboring pixels
+                    // This smooths the sparse flare hits into a continuous streak
+                    float fx = px * float(width) - 0.5;
+                    float fy = py * float(height) - 0.5;
+                    int ix0 = int(floor(fx));
+                    int iy0 = int(floor(fy));
+                    float sx = fx - float(ix0);
+                    float sy = fy - float(iy0);
 
-                        int pidx = (iy * width + ix) * 3;
-                        atomic_fetch_add_explicit(&flare_buf[pidx + 0], contribution.r, memory_order_relaxed);
-                        atomic_fetch_add_explicit(&flare_buf[pidx + 1], contribution.g, memory_order_relaxed);
-                        atomic_fetch_add_explicit(&flare_buf[pidx + 2], contribution.b, memory_order_relaxed);
+                    float3 spectral = wavelength_to_rgb(wavelength, spec_norm);
+                    float3 contribution = light_color * weight * spectral;
+
+                    for (int dy = 0; dy <= 1; dy++) {
+                        for (int dx = 0; dx <= 1; dx++) {
+                            int px_x = ix0 + dx;
+                            int px_y = iy0 + dy;
+                            if (px_x >= 0 && px_x < width && px_y >= 0 && px_y < height) {
+                                float wx = (dx == 0) ? (1.0 - sx) : sx;
+                                float wy = (dy == 0) ? (1.0 - sy) : sy;
+                                float w = wx * wy;
+                                int pidx = (px_y * width + px_x) * 3;
+                                atomic_fetch_add_explicit(&flare_buf[pidx + 0], contribution.r * w, memory_order_relaxed);
+                                atomic_fetch_add_explicit(&flare_buf[pidx + 1], contribution.g * w, memory_order_relaxed);
+                                atomic_fetch_add_explicit(&flare_buf[pidx + 2], contribution.b * w, memory_order_relaxed);
+                            }
+                        }
                     }
                 }
             }
@@ -1452,6 +1471,8 @@ kernel void flare_kernel(
             reflections++;
             if (scene.camera.lenses[nearest_elem].anamorphic > 0.5)
                 reflected_on_cylinder = true;
+            else
+                reflected_on_spherical = true;
         } else {
             // Refract
             float eta = n1 / n2;
@@ -1463,6 +1484,8 @@ kernel void flare_kernel(
                 reflections++;
                 if (scene.camera.lenses[nearest_elem].anamorphic > 0.5)
                     reflected_on_cylinder = true;
+                else
+                    reflected_on_spherical = true;
             } else {
                 dir = refracted;
                 pos = nearest_isect;
