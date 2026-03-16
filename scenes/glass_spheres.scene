@@ -29,11 +29,12 @@ sphere pos=-0.2274,0.0,-3.05 radius=1.2816 color=0.5,0.75,0.75 transparency=0.92
 # Background plane
 plane normal=0,0,1 d=-10 color=1.0,1.0,1.0 emission=0.0 reflectance=0.0 roughness=0.0
 
-# Lights
-light pos=-1,7,5 intensity=2.5
-light pos=7,-5,4 intensity=2.2
-light pos=-7,-5,1 intensity=2.5
-# Bright specular light sources for highlights on glass  
-light pos=4.5,-5,2.5 intensity=20.0 specular=200.0 diffuse=0.0
-light pos=-3.0,6,3.0 intensity=15.0 specular=150.0 diffuse=0.0
+# Key light (slightly warm)
+light pos=0,8,5 intensity=3.0
+# Fill lights (cooler, from sides)
+light pos=8,-3,3 intensity=1.5
+light pos=-8,-3,3 intensity=1.5
+# Specular-only lights for bright glints
+light pos=5,-4,3 intensity=15.0 specular=300.0 diffuse=0.0
+light pos=-4,5,3 intensity=12.0 specular=250.0 diffuse=0.0
 
