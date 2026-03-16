@@ -520,15 +520,10 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             float b = gpu_output[idx + 2];
             if (r < 0) r = 0; if (g < 0) g = 0; if (b < 0) b = 0;
             r *= settings->exposure; g *= settings->exposure; b *= settings->exposure;
-            // Luminance-based ACES filmic tonemapping
-            float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-            if (lum > 0.0001f) {
-                float L = lum;
-                float mapped = (L * (2.51f * L + 0.03f)) / (L * (2.43f * L + 0.59f) + 0.14f);
-                if (mapped > 1.0f) mapped = 1.0f;
-                float scale = mapped / lum;
-                r *= scale; g *= scale; b *= scale;
-            }
+            // Per-channel ACES filmic tonemapping (avoids hue shift from luminance clipping)
+            r = (r * (2.51f * r + 0.03f)) / (r * (2.43f * r + 0.59f) + 0.14f);
+            g = (g * (2.51f * g + 0.03f)) / (g * (2.43f * g + 0.59f) + 0.14f);
+            b = (b * (2.51f * b + 0.03f)) / (b * (2.43f * b + 0.59f) + 0.14f);
             // Contrast around midpoint
             if (settings->contrast != 1.0f) {
                 r = 0.5f + (r - 0.5f) * settings->contrast;

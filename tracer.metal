@@ -999,18 +999,17 @@ kernel void trace_kernel(
         float cosine = 0.5 + 0.5 * (-cam_dir.z);
         color *= cosine;
 
+        // Add glint before firefly clamp so bright specular spikes get compressed
+        color += glint;
+
         // Soft firefly clamp: smoothly compress bright outliers
-        // Values below threshold pass unchanged; above, they're compressed
         float lum_check = color.r + color.g + color.b;
-        float clamp_knee = 10.0;
+        float clamp_knee = 5.0;
         if (lum_check > clamp_knee) {
             float excess = lum_check - clamp_knee;
             float compressed = clamp_knee + clamp_knee * excess / (clamp_knee + excess);
             color *= compressed / lum_check;
         }
-
-        // Add glint separately — no wavelength weighting, no firefly clamp
-        color += glint;
 
         R += color.r;
         G += color.g;
@@ -1216,12 +1215,7 @@ kernel void ghost_kernel(
                             float light_dist = length(lp - hit_point);
                             float atten = 1.0 / (1.0 + light_dist * 0.0001);
 
-                            // Diffuse (same as main camera)
-                            float diffuse = max(dot(normal, incidence), 0.0f);
-                            float diff_term = (1.0 - surf.transparency) * diffuse * 0.9 * scene.lights[li].diffuse_mult;
-                            ghost_contrib += diff_term * surf_color * lc * atten;
-
-                            // Specular (same evaluation as main camera)
+                            // Specular only — ghosts should come from bright highlights, not diffuse
                             float refl_cos = dot(refl_view, incidence);
                             float spec_mult = scene.lights[li].specular;
                             if (surf.phong > 1.0 && refl_cos > 0 && spec_mult > 0) {
@@ -1250,11 +1244,9 @@ kernel void ghost_kernel(
         }
     }
 
-    // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
-    // ghost_boost compensates for physically perfect AR coatings that 
-    // suppress ghost reflections more than desired artistically
-    float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 20.0;
+    // Normalize: average over GHOST_SAMPLES * num_ghost_pairs (Monte Carlo estimator)
+    float ginv = 1.0 / float(GHOST_SAMPLES * max(scene.camera.num_ghost_pairs, 1));
+    float ghost_boost = 1.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
