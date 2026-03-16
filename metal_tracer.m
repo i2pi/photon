@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include "metal_tracer.h"
+#include "scene_parser.h"
 
 // --- GPU struct definitions (must match tracer.metal exactly) ---
 
@@ -246,7 +247,8 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
                              int min_samples, int max_samples,
                              float qual_thresh, int trace_depth,
                              int shadow_rays, int ghost_rays,
-                             char *pixels, float *pixels_f) {
+                             char *pixels, float *pixels_f,
+                             render_settingsT *settings) {
     if (!gpu_ready) {
         fprintf(stderr, "Metal: not initialized\n");
         return;
@@ -489,20 +491,30 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             float g = gpu_output[idx + 1];
             float b = gpu_output[idx + 2];
             if (r < 0) r = 0; if (g < 0) g = 0; if (b < 0) b = 0;
-            // Exposure boost before tonemapping
-            float exposure = 0.6f;
-            r *= exposure; g *= exposure; b *= exposure;
-            // Luminance-based ACES filmic tonemapping — good contrast + HDR compression
-            // while preserving color saturation
+            r *= settings->exposure; g *= settings->exposure; b *= settings->exposure;
+            // Luminance-based ACES filmic tonemapping
             float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
             if (lum > 0.0001f) {
-                // ACES filmic curve (Narkowicz approximation, includes sRGB gamma)
                 float L = lum;
                 float mapped = (L * (2.51f * L + 0.03f)) / (L * (2.43f * L + 0.59f) + 0.14f);
                 if (mapped > 1.0f) mapped = 1.0f;
                 float scale = mapped / lum;
                 r *= scale; g *= scale; b *= scale;
             }
+            // Contrast around midpoint
+            if (settings->contrast != 1.0f) {
+                r = 0.5f + (r - 0.5f) * settings->contrast;
+                g = 0.5f + (g - 0.5f) * settings->contrast;
+                b = 0.5f + (b - 0.5f) * settings->contrast;
+            }
+            // Saturation
+            if (settings->saturation != 1.0f) {
+                float grey = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                r = grey + (r - grey) * settings->saturation;
+                g = grey + (g - grey) * settings->saturation;
+                b = grey + (b - grey) * settings->saturation;
+            }
+            if (r < 0.0f) r = 0.0f; if (g < 0.0f) g = 0.0f; if (b < 0.0f) b = 0.0f;
             if (r > 1.0f) r = 1.0f;
             if (g > 1.0f) g = 1.0f;
             if (b > 1.0f) b = 1.0f;

@@ -10,6 +10,9 @@ typedef struct {
 	int		trace_depth;
 	int		shadow_rays;
 	int		ghost_rays;
+	float	exposure;
+	float	contrast;
+	float	saturation;
 } render_settingsT;
 
 sceneT *load_scene(const char *filename, render_settingsT *settings);

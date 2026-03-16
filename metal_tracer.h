@@ -2,12 +2,14 @@
 #define METAL_TRACER_H
 
 #include "tracer.h"
+#include "scene_parser.h"
 
 int  gpu_init(void);
 void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
                              int min_samples, int max_samples,
                              float qual_thresh, int trace_depth,
                              int shadow_rays, int ghost_rays,
-                             char *pixels, float *pixels_f);
+                             char *pixels, float *pixels_f,
+                             render_settingsT *settings);
 
 #endif

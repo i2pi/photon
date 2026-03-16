@@ -106,7 +106,7 @@ void	render_scene(void)
 	gpu_ray_trace_to_pixels(SCENE, RENDER.width, RENDER.height,
 		RENDER.min_samples, RENDER.max_samples, RENDER.qual_thresh, RENDER.trace_depth,
 		RENDER.shadow_rays, RENDER.ghost_rays,
-		SCREEN_PIXELS, SCREEN_PIXELS_F);
+		SCREEN_PIXELS, SCREEN_PIXELS_F, &RENDER);
 #else
 	ray_trace_to_pixels(SCENE, RENDER.width, RENDER.height,
 		RENDER.min_samples, RENDER.max_samples, RENDER.qual_thresh, RENDER.trace_depth,

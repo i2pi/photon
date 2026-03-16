@@ -88,6 +88,9 @@ sceneT *load_scene(const char *filename, render_settingsT *settings) {
 	settings->trace_depth = 8;
 	settings->shadow_rays = 1;
 	settings->ghost_rays = 1;
+	settings->exposure = 1.0f;
+	settings->contrast = 1.0f;
+	settings->saturation = 1.0f;
 
 	sceneT *s = create_scene();
 	char line[MAX_LINE];
@@ -110,6 +113,9 @@ sceneT *load_scene(const char *filename, render_settingsT *settings) {
 			settings->trace_depth = get_kv_int(tokens, n, "trace_depth", settings->trace_depth);
 			settings->shadow_rays = get_kv_int(tokens, n, "shadow_rays", settings->shadow_rays);
 			settings->ghost_rays = get_kv_int(tokens, n, "ghost_rays", settings->ghost_rays);
+			settings->exposure = get_kv_float(tokens, n, "exposure", settings->exposure);
+			settings->contrast = get_kv_float(tokens, n, "contrast", settings->contrast);
+			settings->saturation = get_kv_float(tokens, n, "saturation", settings->saturation);
 
 		} else if (strcmp(cmd, "camera") == 0) {
 			s->camera.z = get_kv_float(tokens, n, "z", s->camera.z);
