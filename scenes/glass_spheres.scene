@@ -4,10 +4,11 @@
 render width=512 height=512 min_samples=16 max_samples=2000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=0 exposure=0.60 contrast=1.05 saturation=1.00
 
 camera z=0.595 d=0.455
-aperture z=-0.05 radius=0.06
+aperture z=-0.05 radius=0.08
 
-# Single biconvex crown lens, f≈0.498 focused on glass spheres at z=-3.05
-lens z=0.000  r1=0.52  r2=0.52  radius=0.16 cauchy_a=1.523 cauchy_b=0.006 reflectance=0.02
+# Best-form single lens: optimal shape for minimum spherical aberration
+# q=0.77, r1=0.295 (steep, sensor-facing), r2=2.24 (gentle, scene-facing), f=0.498
+lens z=0.000  r1=0.295  r2=2.24  radius=0.16 cauchy_a=1.523 cauchy_b=0.006 reflectance=0.02
 
 # Center sphere 
 sphere pos=-0.3000,0.0,-3.05 radius=0.9 color=0.99,0.58,0.62 roughness=1.0
