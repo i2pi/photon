@@ -1061,7 +1061,7 @@ kernel void trace_kernel(
 // Ghost rays that exit the lens intersect the scene to find emissive sources
 // and specular glints on glass surfaces.
 
-#define GHOST_SAMPLES 128
+#define GHOST_SAMPLES 256
 
 kernel void ghost_kernel(
     constant GPUScene &scene [[buffer(0)]],
@@ -1197,13 +1197,14 @@ kernel void ghost_kernel(
                         ghost_contrib += surf_color * surf.emission;
                     }
 
-                    // Direct lighting: specular-only for ghost contribution
-                    // Use the ghost ray's incoming direction (not canonical view)
-                    // so the ghost image shows glints at DISPLACED positions
+                    // Constant ghost emission removed - using real scene shading
+
+                    // Ghost evaluates what the main camera would see at this hit point.
+                    // The ghost is a re-imaged copy of the camera view through the ghost path.
+                    // Use canonical view direction (toward camera) for specular evaluation.
                     if (surf.is_lens < 0.5) {
-                        // Ghost ray view direction: where the ghost ray came from
-                        float3 ghost_view = -ghost_dir;
-                        float3 refl_view = reflect(-ghost_view, normal);
+                        float3 canonical_view = normalize(hit_point - float3(0, 0, scene.camera.cam_z));
+                        float3 refl_view = canonical_view - 2.0 * dot(canonical_view, normal) * normal;
 
                         for (int li = 0; li < scene.num_lights; li++) {
                             float3 lp = float3(scene.lights[li].px,
@@ -1215,8 +1216,14 @@ kernel void ghost_kernel(
 
                             float3 incidence = normalize(lp - hit_point);
                             float light_dist = length(lp - hit_point);
-                            float refl_cos = dot(refl_view, incidence);
 
+                            // Diffuse
+                            float diffuse = max(dot(normal, incidence), 0.0f);
+                            float diff_term = (1.0 - surf.transparency) * diffuse * 0.9 * scene.lights[li].diffuse_mult;
+                            ghost_contrib += diff_term * surf_color * lc / (1.0 + light_dist * 0.0001);
+
+                            // Specular (same evaluation as main camera)
+                            float refl_cos = dot(refl_view, incidence);
                             float spec_mult = scene.lights[li].specular;
                             if (surf.phong > 1.0 && refl_cos > 0 && spec_mult > 0) {
                                 float glint_size = 1.0 / surf.phong;
@@ -1249,7 +1256,7 @@ kernel void ghost_kernel(
     // ghost_boost compensates for physically perfect AR coatings that 
     // suppress ghost reflections more than desired artistically
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 15.0;
+    float ghost_boost = 50.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;

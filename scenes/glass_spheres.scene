@@ -33,8 +33,7 @@ plane normal=0,0,1 d=-10 color=1.0,1.0,1.0 emission=0.0 reflectance=0.0 roughnes
 light pos=-1,7,5 intensity=1.8
 light pos=7,-5,4 intensity=1.7
 light pos=-7,-5,1 intensity=1.8
-# Bright specular light sources for strong highlights on glass  
-# High specular multiplier creates HDR glints that drive visible ghost streaks
-light pos=4.5,-5,2.5 intensity=20.0 specular=500.0 diffuse=0.0
-light pos=-3.0,6,3.0 intensity=15.0 specular=400.0 diffuse=0.0
+# Bright specular light sources for highlights on glass  
+light pos=4.5,-5,2.5 intensity=20.0 specular=200.0 diffuse=0.0
+light pos=-3.0,6,3.0 intensity=15.0 specular=150.0 diffuse=0.0
 
