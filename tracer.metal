@@ -935,20 +935,9 @@ kernel void trace_kernel(
         bool dispersive = false;
 
         if (scene.camera.num_lenses > 0) {
-            // DOF: stratified lens sampling — use minimum element radius as effective aperture
+            // Aim ray at lens center — minimal DOF, full anamorphic dispersion
             constant GPULensElement &front = scene.camera.lenses[0];
-            float dof_radius = front.radius;
-            for (int le = 1; le < scene.camera.num_lenses; le++)
-                dof_radius = min(dof_radius, scene.camera.lenses[le].radius);
-            if (scene.camera.aperture_radius > 0)
-                dof_radius = min(dof_radius, scene.camera.aperture_radius);
-            float angle = 2.0 * M_PI_F * fract(float(seq_idx) * 0.7548776662 + pixel_rand_a);
-            float rad = dof_radius * sqrt(fract(float(seq_idx) * 0.3247179572 + pixel_rand_b));
-            lens_point = float3(
-                rad * cos(angle),
-                rad * sin(angle),
-                front.z
-            );
+            lens_point = float3(0, 0, front.z);
 
             float3 ray_dir = normalize(lens_point - sensor_origin);
 

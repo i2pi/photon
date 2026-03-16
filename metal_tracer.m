@@ -490,7 +490,7 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             float b = gpu_output[idx + 2];
             if (r < 0) r = 0; if (g < 0) g = 0; if (b < 0) b = 0;
             // Exposure boost before tonemapping
-            float exposure = 0.35f;
+            float exposure = 0.6f;
             r *= exposure; g *= exposure; b *= exposure;
             // Luminance-based ACES filmic tonemapping — good contrast + HDR compression
             // while preserving color saturation
