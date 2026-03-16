@@ -1505,9 +1505,10 @@ kernel void flare_kernel(
     float3 spectral = wavelength_to_rgb(wavelength, spec_norm);
     // Suppress violet red leakage (wavelength_to_rgb returns R+B for <440nm)
     if (wavelength < 440.0) spectral.r *= 0.05;
-    // Coating scatter efficiency: peaks at ~475nm (blue-cyan), FWHM ~70nm
-    float coating_scatter = exp(-0.5 * (wavelength - 475.0) * (wavelength - 475.0) / (70.0 * 70.0));
-    // Mix: mostly coating-scattered blue + a little broadband white
+    // Coating scatter efficiency: peaks at ~500nm (cyan), FWHM ~100nm
+    // This matches the blue-cyan color of real anamorphic lens flares
+    float coating_scatter = exp(-0.5 * (wavelength - 500.0) * (wavelength - 500.0) / (100.0 * 100.0));
+    // Mix: mostly coating-scattered cyan + a little broadband white
     float scatter_weight = 0.80 * coating_scatter + 0.20;
     float3 contribution = light_color * source_weight * weight * spectral * scatter_weight;
 

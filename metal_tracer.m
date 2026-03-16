@@ -589,6 +589,9 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             r = (r * (2.51f * r + 0.03f)) / (r * (2.43f * r + 0.59f) + 0.14f);
             g = (g * (2.51f * g + 0.03f)) / (g * (2.43f * g + 0.59f) + 0.14f);
             b = (b * (2.51f * b + 0.03f)) / (b * (2.43f * b + 0.59f) + 0.14f);
+            // Normalize: ACES peaks at 2.51/2.43 ≈ 1.033, rescale so bright whites reach 1.0
+            r *= (2.43f / 2.51f); g *= (2.43f / 2.51f); b *= (2.43f / 2.51f);
+            r = r * 1.08f; g = g * 1.08f; b = b * 1.08f;
             // Contrast around midpoint
             if (settings->contrast != 1.0f) {
                 r = 0.5f + (r - 0.5f) * settings->contrast;
