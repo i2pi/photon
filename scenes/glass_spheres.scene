@@ -10,10 +10,10 @@ aperture z=-0.02 radius=0.04
 lens z=0.000  r1=-0.45  r2=0.55   radius=0.15 cauchy_a=1.02 cauchy_b=0.02 reflectance=0.35 anamorphic=90
 # Petzval Group 1: crown biconvex + flint meniscus
 lens z=-0.022 r1=1.15  r2=1.15  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.04
-lens z=-0.027 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.03
+lens z=-0.027 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.015 reflectance=0.03
 # Petzval Group 2: crown biconvex + flint meniscus
 lens z=-0.042 r1=1.60  r2=1.60  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.02
-lens z=-0.054 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.04
+lens z=-0.054 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.015 reflectance=0.04
 
 # Center sphere (darker, more neutral)
 sphere pos=-0.3000,0.0,-3.05 radius=0.9 color=0.70,0.65,0.72 roughness=1.0 reflectance=0.0
