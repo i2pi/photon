@@ -3,17 +3,17 @@
 
 render width=512 height=512 min_samples=512 max_samples=4000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=1 exposure=0.22 contrast=1.25
 
-camera z=0.54 d=0.44
+camera z=0.55 d=0.44
 aperture z=-0.026 radius=0.024
 
 # Front anamorphic cylinder: weaker power, actually dispersive, lower reflectance for contrast
 lens z=0.000  r1=-0.85  r2=1.00  radius=0.16 cauchy_a=1.06 cauchy_b=0.030 reflectance=0.16 anamorphic=90
 # Petzval Group 1: stronger positive crown + stronger dispersive flint
 lens z=-0.018 r1=0.92  r2=0.98  radius=0.15 cauchy_a=1.53 cauchy_b=0.006 reflectance=0.025
-lens z=-0.029 r1=-1.35 r2=1.95  radius=0.15 cauchy_a=1.64 cauchy_b=0.036 reflectance=0.055
+lens z=-0.029 r1=-1.35 r2=1.95  radius=0.15 cauchy_a=1.64 cauchy_b=0.032 reflectance=0.055
 # Petzval Group 2: slightly weaker repeat
 lens z=-0.046 r1=1.12  r2=1.18  radius=0.15 cauchy_a=1.53 cauchy_b=0.006 reflectance=0.025
-lens z=-0.060 r1=-1.55 r2=2.10  radius=0.15 cauchy_a=1.64 cauchy_b=0.036 reflectance=0.065
+lens z=-0.060 r1=-1.55 r2=2.10  radius=0.15 cauchy_a=1.64 cauchy_b=0.032 reflectance=0.065
 
 # Center sphere (darker, more neutral)
 sphere pos=-0.3000,0.0,-3.05 radius=0.9 color=0.70,0.65,0.72 roughness=1.0 reflectance=0.0
