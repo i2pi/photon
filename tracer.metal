@@ -662,13 +662,13 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
 
         if (force_reflect) {
             weight *= fresnel_r;
-            if (weight <= 0.0001f) return 0;
+            if (weight <= 1e-7f) return 0;
             dir = normalize(dir - 2.0 * dot(dir, n) * n);
             pos = nearest_isect;
             reflections_done++;
         } else {
             weight *= (1.0 - fresnel_r);
-            if (weight <= 0.0001f) return 0;
+            if (weight <= 1e-7f) return 0;
             float eta = n1 / n2;
             float3 refracted = refract(dir, n, eta);
             if (length(refracted) < 0.001) return 0;

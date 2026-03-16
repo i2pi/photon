@@ -6,10 +6,10 @@ render width=512 height=512 min_samples=128 max_samples=2000 qual_thresh=0.01 tr
 camera z=0.5 d=0.50
 aperture z=-0.02 radius=0.04
 
-# Anamorphic cylinder (front element)
-lens z=0.000  r1=-0.8  r2=0.9   radius=0.15 cauchy_a=1.02 cauchy_b=0.02 reflectance=0.08 anamorphic=90
-# Petzval Group 1: crown biconvex + flint meniscus
-lens z=-0.015 r1=1.15  r2=1.15  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.03
+# Anamorphic cylinder (front element) — stronger cylinder, higher reflectance for ghosts
+lens z=0.000  r1=-0.55  r2=0.65   radius=0.15 cauchy_a=1.02 cauchy_b=0.02 reflectance=0.15 anamorphic=90
+# Petzval Group 1: crown biconvex + flint meniscus — increased gap after anamorphic
+lens z=-0.022 r1=1.15  r2=1.15  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.08
 lens z=-0.027 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.05
 # Petzval Group 2: crown biconvex + flint meniscus
 lens z=-0.042 r1=1.60  r2=1.60  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.01
