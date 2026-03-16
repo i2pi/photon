@@ -623,12 +623,13 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
             }
         }
 
-        // Aperture check
-        if (cam.aperture_radius > 0 && abs(dir.z) > 0.0001) {
+        // Aperture check: use larger ghost aperture for anamorphic streak extent
+        float ghost_stop = max(cam.aperture_radius * 8.0f, 0.05f);
+        if (ghost_stop > 0 && abs(dir.z) > 0.0001) {
             float t_ap = (cam.aperture_z - pos.z) / dir.z;
             if (t_ap > LENS_EPS && (nearest_elem < 0 || t_ap < nearest_t)) {
                 float3 ap_hit = pos + t_ap * dir;
-                if (ap_hit.x * ap_hit.x + ap_hit.y * ap_hit.y > cam.aperture_radius * cam.aperture_radius)
+                if (ap_hit.x * ap_hit.x + ap_hit.y * ap_hit.y > ghost_stop * ghost_stop)
                     return 0;
             }
         }
@@ -1242,7 +1243,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 0.005;
+    float ghost_boost = 0.00005;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
@@ -1273,7 +1274,7 @@ kernel void flare_kernel(
     if (scene.camera.num_lenses <= 0) return;
 
     int total_lights = scene.num_lights;
-    int samples_per_light = 4194304;  // 4M samples per light for smooth flare coverage
+    int samples_per_light = 8388608;  // 8M samples per light for smooth flare coverage
     int total_samples = total_lights * samples_per_light;
     if ((int)tid >= total_samples) return;
 
@@ -1320,7 +1321,7 @@ kernel void flare_kernel(
     float cos_angle = max(abs(to_lens.z), 0.1f);
     // Flare boost: real flares are visible because of high source brightness
     // and sensor integration time. Scale up to make visible in our render.
-    float flare_boost = 80000.0;
+    float flare_boost = 200000.0;
     float weight = spec_mult * cos_angle * M_PI_F * lens_radius * lens_radius
                    * flare_boost / (light_dist * light_dist * float(samples_per_light));
 
@@ -1332,8 +1333,10 @@ kernel void flare_kernel(
     float z_max = max(z_front, z_back) + z_margin;
     float z_min = min(z_front, z_back) - z_margin;
 
-    // Must have at least one reflection for this to be a flare ray
+    // Track reflections: require at least one on the anamorphic cylinder (element 0)
+    // to produce horizontal streaks rather than circular blobs from spherical elements
     int reflections = 0;
+    bool reflected_on_cylinder = false;
 
     for (int bounce = 0; bounce < FLARE_MAX_BOUNCES; bounce++) {
         if (weight < 1e-8) break;
@@ -1385,21 +1388,24 @@ kernel void flare_kernel(
             }
         }
 
-        // Aperture check
-        if (scene.camera.aperture_radius > 0 && abs(dir.z) > 0.0001) {
+        // Aperture check: use a much larger flare aperture than the beauty aperture
+        // to allow off-axis rays that create long anamorphic streaks
+        float flare_aperture = max(scene.camera.aperture_radius * 8.0f, 0.05f);
+        if (flare_aperture > 0 && abs(dir.z) > 0.0001) {
             float t_ap = (scene.camera.aperture_z - pos.z) / dir.z;
             if (t_ap > LENS_EPS && (nearest_elem < 0 || t_ap < nearest_t)) {
                 float3 ap_hit = pos + t_ap * dir;
                 if (ap_hit.x * ap_hit.x + ap_hit.y * ap_hit.y >
-                    scene.camera.aperture_radius * scene.camera.aperture_radius)
-                    break;  // blocked by aperture
+                    flare_aperture * flare_aperture)
+                    break;  // blocked by flare aperture
             }
         }
 
         if (nearest_elem < 0) {
             // Ray exits lens system
-            // If heading toward sensor (dir.z > 0) and has reflected at least once = flare
-            if (dir.z > 0 && reflections > 0) {
+            // Only accumulate if reflected at least once on the anamorphic cylinder
+            // This ensures streaks come from cylindrical optics, not spherical blob ghosts
+            if (dir.z > 0 && reflections > 0 && reflected_on_cylinder) {
                 // Intersect with sensor plane at z = cam_z
                 float t_sensor = (scene.camera.cam_z - pos.z) / dir.z;
                 if (t_sensor > 0) {
@@ -1444,6 +1450,8 @@ kernel void flare_kernel(
             dir = normalize(dir - 2.0 * dot(dir, n) * n);
             pos = nearest_isect;
             reflections++;
+            if (scene.camera.lenses[nearest_elem].anamorphic > 0.5)
+                reflected_on_cylinder = true;
         } else {
             // Refract
             float eta = n1 / n2;
@@ -1453,6 +1461,8 @@ kernel void flare_kernel(
                 dir = normalize(dir - 2.0 * dot(dir, n) * n);
                 pos = nearest_isect;
                 reflections++;
+                if (scene.camera.lenses[nearest_elem].anamorphic > 0.5)
+                    reflected_on_cylinder = true;
             } else {
                 dir = refracted;
                 pos = nearest_isect;
