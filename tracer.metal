@@ -1333,7 +1333,7 @@ kernel void flare_kernel(
     // Source weight: solid angle of the lens aperture as seen from glint
     float glint_dist = length(lens_point - glint_pos);
     float cos_theta = max(abs(ray_dir.z), 0.1f);
-    float flare_boost = 250000.0;
+    float flare_boost = 200000.0;
     float source_weight = spec_mult * cos_theta * M_PI_F * lens_radius * lens_radius
                           * flare_boost / (glint_dist * glint_dist * float(samples_per_light));
 
@@ -1408,8 +1408,8 @@ kernel void flare_kernel(
             float t_ap = (cam.aperture_z - pos.z) / dir.z;
             if (t_ap > LENS_EPS && (nearest_elem < 0 || t_ap < nearest_t)) {
                 float3 ap_hit = pos + t_ap * dir;
-                // Use wider aperture for scatter paths
-                float effective_ap = scattered ? cam.aperture_radius * 4.0 : cam.aperture_radius;
+                // Use wider aperture for scatter paths (scattered light bypasses the stop)
+                float effective_ap = scattered ? cam.aperture_radius * 8.0 : cam.aperture_radius;
                 if (ap_hit.x * ap_hit.x + ap_hit.y * ap_hit.y > effective_ap * effective_ap)
                     return;
             }
