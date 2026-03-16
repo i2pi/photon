@@ -587,7 +587,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
             // Amplify dispersion for ghost rays — spreads wavelengths apart
             // to create visible rainbow. Still physics-based: same ray paths
             // through real lens geometry, just with boosted chromatic separation.
-            float ghost_dispersion_boost = 15.0;
+            float ghost_dispersion_boost = 40.0;
             float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b * ghost_dispersion_boost, wavelength);
             bool is_cyl = (elem.anamorphic > 0.5);
             float cyl_ang = elem.anamorphic;
@@ -944,9 +944,11 @@ kernel void trace_kernel(
         bool dispersive = false;
 
         if (scene.camera.num_lenses > 0) {
-            // DOF: stratified lens sampling — use aperture radius if defined, else front element
+            // DOF: stratified lens sampling — use minimum element radius as effective aperture
             constant GPULensElement &front = scene.camera.lenses[0];
             float dof_radius = front.radius;
+            for (int le = 1; le < scene.camera.num_lenses; le++)
+                dof_radius = min(dof_radius, scene.camera.lenses[le].radius);
             if (scene.camera.aperture_radius > 0)
                 dof_radius = min(dof_radius, scene.camera.aperture_radius);
             float angle = 2.0 * M_PI_F * fract(float(seq_idx) * 0.7548776662 + pixel_rand_a);
