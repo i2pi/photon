@@ -23,6 +23,8 @@ struct GPULight {
 struct GPULensElement {
     float z, r1, r2, radius;
     float cauchy_a, cauchy_b, reflectance, anamorphic;
+    float front_center_z, back_center_z;
+    float pad_le0, pad_le1;
 };
 
 struct GPUCamera {
@@ -30,6 +32,9 @@ struct GPUCamera {
     int num_lenses, pad_cam;
     float aperture_z, aperture_radius, pad_a0, pad_a1;
     GPULensElement lenses[GPU_MAX_LENSES];
+    int ghost_pairs[90 * 2];
+    int num_ghost_pairs;
+    int pad_gp;
 };
 
 struct BVHNode {
@@ -413,14 +418,12 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
 
         for (int e = 0; e < cam.num_lenses; e++) {
             constant GPULensElement &elem = cam.lenses[e];
-            float z = elem.z;
-            float R = elem.radius;
+            float R_sq = elem.radius * elem.radius;
             float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
 
             // Front surface
             float abs_r1 = abs(elem.r1);
-            float sign1 = (elem.r1 > 0) ? 1.0 : -1.0;
-            float fc_z = z - sign1 * sqrt(abs_r1 * abs_r1 - R * R);
+            float fc_z = elem.front_center_z;
             bool is_cyl = (elem.anamorphic > 0.5);
             float cyl_angle = elem.anamorphic;
 
@@ -436,8 +439,7 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
                 if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;
-                float xy_r = length(float2(isect.x, isect.y));
-                if (xy_r > R) continue;
+                if (isect.x * isect.x + isect.y * isect.y > R_sq) continue;
 
                 float3 normal = is_cyl
                     ? cylinder_normal(isect, fc_z, cyl_angle)
@@ -454,8 +456,7 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
 
             // Back surface
             float abs_r2 = abs(elem.r2);
-            float sign2 = (elem.r2 > 0) ? 1.0 : -1.0;
-            float bc_z = z + sign2 * sqrt(abs_r2 * abs_r2 - R * R);
+            float bc_z = elem.back_center_z;
 
             if (is_cyl) {
                 ray_cylinder_t(bc_z, abs_r2, cyl_angle, pos, dir, t0, t1);
@@ -467,8 +468,7 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
                 if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;
-                float xy_r = length(float2(isect.x, isect.y));
-                if (xy_r > R) continue;
+                if (isect.x * isect.x + isect.y * isect.y > R_sq) continue;
 
                 float3 normal = is_cyl
                     ? cylinder_normal(isect, bc_z, cyl_angle)
@@ -489,8 +489,7 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
             float t_ap = (cam.aperture_z - pos.z) / dir.z;
             if (t_ap > LENS_EPS && (nearest_elem < 0 || t_ap < nearest_t)) {
                 float3 ap_hit = pos + t_ap * dir;
-                float ap_r = length(float2(ap_hit.x, ap_hit.y));
-                if (ap_r > cam.aperture_radius)
+                if (ap_hit.x * ap_hit.x + ap_hit.y * ap_hit.y > cam.aperture_radius * cam.aperture_radius)
                     return false;  // blocked by aperture
             }
         }
@@ -582,11 +581,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
 
         for (int e = 0; e < cam.num_lenses; e++) {
             constant GPULensElement &elem = cam.lenses[e];
-            float z = elem.z;
-            float R = elem.radius;
-            // Amplify dispersion for ghost rays — spreads wavelengths apart
-            // to create visible rainbow. Still physics-based: same ray paths
-            // through real lens geometry, just with boosted chromatic separation.
+            float R_sq = elem.radius * elem.radius;
             float ghost_dispersion_boost = 40.0;
             float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b * ghost_dispersion_boost, wavelength);
             bool is_cyl = (elem.anamorphic > 0.5);
@@ -594,8 +589,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
 
             // Front surface (surf_id = e*2)
             float abs_r1 = abs(elem.r1);
-            float sign1 = (elem.r1 > 0) ? 1.0 : -1.0;
-            float fc_z = z - sign1 * sqrt(abs_r1 * abs_r1 - R * R);
+            float fc_z = elem.front_center_z;
             float t0, t1;
             if (is_cyl) ray_cylinder_t(fc_z, abs_r1, cyl_ang, pos, dir, t0, t1);
             else ray_sphere_t(float3(0, 0, fc_z), abs_r1, pos, dir, t0, t1);
@@ -604,7 +598,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
                 if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;
-                if (length(float2(isect.x, isect.y)) > R) continue;
+                if (isect.x * isect.x + isect.y * isect.y > R_sq) continue;
                 float3 normal = is_cyl ? cylinder_normal(isect, fc_z, cyl_ang)
                                        : normalize(isect - float3(0, 0, fc_z));
                 nearest_t = t; nearest_isect = isect; nearest_normal = normal;
@@ -613,8 +607,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
 
             // Back surface (surf_id = e*2 + 1)
             float abs_r2 = abs(elem.r2);
-            float sign2 = (elem.r2 > 0) ? 1.0 : -1.0;
-            float bc_z = z + sign2 * sqrt(abs_r2 * abs_r2 - R * R);
+            float bc_z = elem.back_center_z;
             if (is_cyl) ray_cylinder_t(bc_z, abs_r2, cyl_ang, pos, dir, t0, t1);
             else ray_sphere_t(float3(0, 0, bc_z), abs_r2, pos, dir, t0, t1);
             for (int h = 0; h < 2; h++) {
@@ -622,7 +615,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
                 if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;
-                if (length(float2(isect.x, isect.y)) > R) continue;
+                if (isect.x * isect.x + isect.y * isect.y > R_sq) continue;
                 float3 normal = is_cyl ? cylinder_normal(isect, bc_z, cyl_ang)
                                        : normalize(isect - float3(0, 0, bc_z));
                 nearest_t = t; nearest_isect = isect; nearest_normal = normal;
@@ -635,7 +628,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
             float t_ap = (cam.aperture_z - pos.z) / dir.z;
             if (t_ap > LENS_EPS && (nearest_elem < 0 || t_ap < nearest_t)) {
                 float3 ap_hit = pos + t_ap * dir;
-                if (length(float2(ap_hit.x, ap_hit.y)) > cam.aperture_radius)
+                if (ap_hit.x * ap_hit.x + ap_hit.y * ap_hit.y > cam.aperture_radius * cam.aperture_radius)
                     return 0;
             }
         }
@@ -668,11 +661,13 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
 
         if (force_reflect) {
             weight *= fresnel_r;
+            if (weight <= 0.0001f) return 0;
             dir = normalize(dir - 2.0 * dot(dir, n) * n);
             pos = nearest_isect;
             reflections_done++;
         } else {
             weight *= (1.0 - fresnel_r);
+            if (weight <= 0.0001f) return 0;
             float eta = n1 / n2;
             float3 refracted = refract(dir, n, eta);
             if (length(refracted) < 0.001) return 0;
@@ -891,10 +886,6 @@ kernel void trace_kernel(
     int prev_samples = int(accum[aidx + 3]);
     float running_mean = accum[aidx + 4];
     float M2 = accum[aidx + 5]; // sum of squared differences (Welford)
-    float ghost_R = accum[aidx + 6];
-    float ghost_G = accum[aidx + 7];
-    float ghost_B = accum[aidx + 8];
-    float ghost_n = accum[aidx + 9];
 
     // Already converged from previous batch?
     if (prev_samples >= scene.max_samples) return;
@@ -999,60 +990,6 @@ kernel void trace_kernel(
         B += color.b;
         num_samples++;
 
-        // Ghost rays: accumulated SEPARATELY from main image to avoid noise contamination.
-        // Only trace every 4th sample — ghosts are deterministic per-pixel (no DOF)
-        // so fewer samples suffice. The wavelength still varies, giving spectral spread.
-        if (scene.ghost_rays && scene.camera.num_lenses >= 2 && (seq_idx & 3) == 0) {
-            int num_surfaces = scene.camera.num_lenses * 2;
-            float3 ghost_lens_center = float3(0, 0, scene.camera.lenses[0].z);
-            float3 ghost_ray_dir = normalize(ghost_lens_center - sensor_origin);
-
-            for (int s1 = 1; s1 < num_surfaces; s1++) {
-                for (int s2 = 0; s2 < s1; s2++) {
-                    // Only trace pairs where at least one surface is on an anamorphic element
-                    // (these create the directional streak; spherical pairs just add circular haze)
-                    int e1 = s1 / 2;
-                    int e2 = s2 / 2;
-                    bool has_anamorphic = (scene.camera.lenses[e1].anamorphic > 0.5) ||
-                                          (scene.camera.lenses[e2].anamorphic > 0.5);
-                    if (!has_anamorphic) continue;
-
-                    float3 ghost_origin, ghost_dir;
-                    float gw = ray_ghost_through_lens(
-                        sensor_origin, ghost_ray_dir,
-                        scene.camera, wavelength, s1, s2,
-                        ghost_origin, ghost_dir);
-
-                    if (gw > 0.0001) {
-                        for (int si = 0; si < scene.num_spheres; si++) {
-                            if (scene.spheres[si].emission < 1.0) continue;
-                            float3 sc = float3(scene.spheres[si].cx,
-                                               scene.spheres[si].cy,
-                                               scene.spheres[si].cz);
-                            float sr = scene.spheres[si].radius;
-                            float3 oc = ghost_origin - sc;
-                            float gb = dot(oc, ghost_dir);
-                            float gc_disc = gb * gb - (dot(oc, oc) - sr * sr);
-                            if (gc_disc > 0) {
-                                float gt = -gb - sqrt(gc_disc);
-                                if (gt > 0.001) {
-                                    float3 gc = float3(scene.spheres[si].color_r,
-                                                       scene.spheres[si].color_g,
-                                                       scene.spheres[si].color_b);
-                                    gc *= scene.spheres[si].emission * gw;
-                                    gc *= wavelength_to_rgb(wavelength, spec_norm);
-                                    ghost_R += gc.r;
-                                    ghost_G += gc.g;
-                                    ghost_B += gc.b;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            ghost_n += 1.0;
-        }
-
         // Adaptive convergence (Welford's online variance)
         float lum = color.r + color.g + color.b;
         float old_mean = running_mean;
@@ -1079,22 +1016,108 @@ kernel void trace_kernel(
     accum[aidx + 3] = float(num_samples);
     accum[aidx + 4] = running_mean;
     accum[aidx + 5] = M2;
-    accum[aidx + 6] = ghost_R;
-    accum[aidx + 7] = ghost_G;
-    accum[aidx + 8] = ghost_B;
-    accum[aidx + 9] = ghost_n;
 
-    // Output: main image + ghost overlay
+    // Output: main image only (ghosts composited by separate kernel)
     int n = max(num_samples, 1);
     float inv_n = 1.0 / float(n);
-    float ginv = (ghost_n > 0) ? (1.0 / ghost_n) : 0.0;
 
-    // Ghost average
-    float3 gavg = float3(ghost_R, ghost_G, ghost_B) * ginv;
-
-    // Output raw HDR — tonemapping happens in host
     int idx = pixel_idx * 3;
-    output[idx + 0] = R * inv_n + gavg.r;
-    output[idx + 1] = G * inv_n + gavg.g;
-    output[idx + 2] = B * inv_n + gavg.b;
+    output[idx + 0] = R * inv_n;
+    output[idx + 1] = G * inv_n;
+    output[idx + 2] = B * inv_n;
+}
+
+// --- Separate ghost kernel: runs once with fixed sample count ---
+// Ghost rays only vary by wavelength (no DOF), so 32 spectral samples suffice.
+
+#define GHOST_SAMPLES 32
+
+kernel void ghost_kernel(
+    constant GPUScene &scene [[buffer(0)]],
+    device float *output [[buffer(1)]],
+    device float *ghost_buf [[buffer(2)]],
+    uint2 gid [[thread_position_in_grid]]
+) {
+    int x = gid.x;
+    int y = gid.y;
+    int width = scene.width;
+    int height = scene.height;
+
+    if (x >= width || y >= height) return;
+    if (!scene.ghost_rays || scene.camera.num_ghost_pairs <= 0) return;
+
+    uint pixel_idx = y * width + x;
+
+    float X = 2.0 * (0.5 - (float(x) / float(width)));
+    float Y = 2.0 * (0.5 - (float(y) / float(height)));
+    float aspect = float(width) / float(height);
+
+    float3 sensor_origin = float3(
+        scene.camera.cam_d * X * aspect,
+        scene.camera.cam_d * Y,
+        scene.camera.cam_z
+    );
+
+    float3 spec_norm = float3(scene.spec_norm_r, scene.spec_norm_g, scene.spec_norm_b);
+    float3 ghost_lens_center = float3(0, 0, scene.camera.lenses[0].z);
+    float3 ghost_ray_dir = normalize(ghost_lens_center - sensor_origin);
+
+    // Fixed per-pixel RNG for wavelength Cranley-Patterson offset
+    RNG pixel_rng(scene.frame_seed ^ pixel_idx * 1973u ^ uint(x) * 9277u ^ uint(y) * 6581u);
+    float pixel_rand_w = pixel_rng.uniform();
+
+    float ghost_R = 0, ghost_G = 0, ghost_B = 0;
+
+    for (int i = 0; i < GHOST_SAMPLES; i++) {
+        float wavelength = 380.0 + 400.0 * fract(float(i) * 0.6180339887 + pixel_rand_w);
+
+        for (int p = 0; p < scene.camera.num_ghost_pairs; p++) {
+            int s1 = scene.camera.ghost_pairs[p * 2];
+            int s2 = scene.camera.ghost_pairs[p * 2 + 1];
+
+            float3 ghost_origin, ghost_dir;
+            float gw = ray_ghost_through_lens(
+                sensor_origin, ghost_ray_dir,
+                scene.camera, wavelength, s1, s2,
+                ghost_origin, ghost_dir);
+
+            if (gw > 0.0001) {
+                for (int si = 0; si < scene.num_spheres; si++) {
+                    if (scene.spheres[si].emission < 1.0) continue;
+                    float3 sc = float3(scene.spheres[si].cx,
+                                       scene.spheres[si].cy,
+                                       scene.spheres[si].cz);
+                    float sr = scene.spheres[si].radius;
+                    float3 oc = ghost_origin - sc;
+                    float gb = dot(oc, ghost_dir);
+                    float gc_disc = gb * gb - (dot(oc, oc) - sr * sr);
+                    if (gc_disc > 0) {
+                        float gt = -gb - sqrt(gc_disc);
+                        if (gt > 0.001) {
+                            float3 gc = float3(scene.spheres[si].color_r,
+                                               scene.spheres[si].color_g,
+                                               scene.spheres[si].color_b);
+                            gc *= scene.spheres[si].emission * gw;
+                            gc *= wavelength_to_rgb(wavelength, spec_norm);
+                            ghost_R += gc.r;
+                            ghost_G += gc.g;
+                            ghost_B += gc.b;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Write ghost average to ghost buffer
+    float ginv = 1.0 / float(GHOST_SAMPLES);
+    int gidx = pixel_idx * 3;
+    ghost_buf[gidx + 0] = ghost_R * ginv;
+    ghost_buf[gidx + 1] = ghost_G * ginv;
+    ghost_buf[gidx + 2] = ghost_B * ginv;
+
+    // Add ghost to main output
+    output[gidx + 0] += ghost_R * ginv;
+    output[gidx + 1] += ghost_G * ginv;
+    output[gidx + 2] += ghost_B * ginv;
 }

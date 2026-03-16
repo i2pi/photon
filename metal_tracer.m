@@ -28,6 +28,8 @@ typedef struct {
 typedef struct {
     float z, r1, r2, radius;
     float cauchy_a, cauchy_b, reflectance, anamorphic;
+    float front_center_z, back_center_z;
+    float pad_le0, pad_le1;
 } GPULensElement;
 
 typedef struct {
@@ -35,6 +37,9 @@ typedef struct {
     int num_lenses, pad_cam;
     float aperture_z, aperture_radius, pad_a0, pad_a1;
     GPULensElement lenses[GPU_MAX_LENSES];
+    int ghost_pairs[90 * 2];
+    int num_ghost_pairs;
+    int pad_gp;
 } GPUCamera;
 
 typedef struct {
@@ -73,6 +78,7 @@ typedef struct {
 static id<MTLDevice>              mtl_device;
 static id<MTLCommandQueue>        mtl_queue;
 static id<MTLComputePipelineState> mtl_pipeline;
+static id<MTLComputePipelineState> mtl_ghost_pipeline;
 static int gpu_ready = 0;
 
 int gpu_init(void) {
@@ -127,6 +133,15 @@ int gpu_init(void) {
             fprintf(stderr, "Metal: pipeline error: %s\n",
                     [[error localizedDescription] UTF8String]);
             return -1;
+        }
+
+        id<MTLFunction> ghost_fn = [library newFunctionWithName:@"ghost_kernel"];
+        if (ghost_fn) {
+            mtl_ghost_pipeline = [mtl_device newComputePipelineStateWithFunction:ghost_fn error:&error];
+            if (!mtl_ghost_pipeline) {
+                fprintf(stderr, "Metal: ghost pipeline error: %s\n",
+                        [[error localizedDescription] UTF8String]);
+            }
         }
 
         printf("Metal: pipeline ready (max threads/group: %lu)\n",
@@ -295,6 +310,30 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             gpu_scene.camera.lenses[i].cauchy_b = lens->cauchy_b;
             gpu_scene.camera.lenses[i].reflectance = lens->reflectance;
             gpu_scene.camera.lenses[i].anamorphic = lens->anamorphic;
+
+            float abs_r1 = fabsf(lens->r1);
+            float sign1 = (lens->r1 > 0) ? 1.0f : -1.0f;
+            gpu_scene.camera.lenses[i].front_center_z = lens->z - sign1 * sqrtf(abs_r1 * abs_r1 - lens->radius * lens->radius);
+
+            float abs_r2 = fabsf(lens->r2);
+            float sign2 = (lens->r2 > 0) ? 1.0f : -1.0f;
+            gpu_scene.camera.lenses[i].back_center_z = lens->z + sign2 * sqrtf(abs_r2 * abs_r2 - lens->radius * lens->radius);
+        }
+
+        // Precompute valid ghost pairs (only those involving anamorphic elements)
+        gpu_scene.camera.num_ghost_pairs = 0;
+        int num_surfaces = gpu_scene.camera.num_lenses * 2;
+        for (int s1 = 1; s1 < num_surfaces; s1++) {
+            for (int s2 = 0; s2 < s1; s2++) {
+                int e1 = s1 / 2, e2 = s2 / 2;
+                if (scene->camera.lens[e1].anamorphic > 0.5f ||
+                    scene->camera.lens[e2].anamorphic > 0.5f) {
+                    int idx = gpu_scene.camera.num_ghost_pairs * 2;
+                    gpu_scene.camera.ghost_pairs[idx] = s1;
+                    gpu_scene.camera.ghost_pairs[idx + 1] = s2;
+                    gpu_scene.camera.num_ghost_pairs++;
+                }
+            }
         }
 
         // Pack objects: separate spheres and planes
@@ -365,15 +404,18 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
         MTLSize group = MTLSizeMake(w, h, 1);
 
         // Dispatch in batches to avoid GPU watchdog timeout
-        int batch = 4;
+        int batch = 64;
         struct timeval batch_start, batch_end;
-        for (int offset = 0; offset < max_samples; offset += batch) {
-            gpu_scene.sample_offset = offset;
-            gpu_scene.batch_size = batch;
 
-            id<MTLBuffer> scene_buf = [mtl_device newBufferWithBytes:&gpu_scene
-                                                              length:sizeof(GPUScene)
-                                                             options:MTLResourceStorageModeShared];
+        // Create scene buffer once, update per-batch fields in place
+        id<MTLBuffer> scene_buf = [mtl_device newBufferWithBytes:&gpu_scene
+                                                          length:sizeof(GPUScene)
+                                                         options:MTLResourceStorageModeShared];
+
+        for (int offset = 0; offset < max_samples; offset += batch) {
+            GPUScene *buf_ptr = (GPUScene *)[scene_buf contents];
+            buf_ptr->sample_offset = offset;
+            buf_ptr->batch_size = batch;
 
             id<MTLCommandBuffer> cmd = [mtl_queue commandBuffer];
             id<MTLComputeCommandEncoder> enc = [cmd computeCommandEncoder];
@@ -402,6 +444,36 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
                         (long)[[cmd error] code],
                         [[[cmd error] localizedDescription] UTF8String]);
             }
+        }
+
+        // Dispatch ghost kernel (single pass, fixed sample count)
+        if (ghost_rays && mtl_ghost_pipeline) {
+            size_t ghost_size = sizeof(float) * width * height * 3;
+            id<MTLBuffer> ghost_buf = [mtl_device newBufferWithLength:ghost_size
+                                                              options:MTLResourceStorageModeShared];
+            memset([ghost_buf contents], 0, ghost_size);
+
+            NSUInteger gw = [mtl_ghost_pipeline threadExecutionWidth];
+            NSUInteger gh = [mtl_ghost_pipeline maxTotalThreadsPerThreadgroup] / gw;
+            MTLSize ghost_group = MTLSizeMake(gw, gh, 1);
+
+            id<MTLCommandBuffer> ghost_cmd = [mtl_queue commandBuffer];
+            id<MTLComputeCommandEncoder> ghost_enc = [ghost_cmd computeCommandEncoder];
+            [ghost_enc setComputePipelineState:mtl_ghost_pipeline];
+            [ghost_enc setBuffer:scene_buf offset:0 atIndex:0];
+            [ghost_enc setBuffer:output_buf offset:0 atIndex:1];
+            [ghost_enc setBuffer:ghost_buf offset:0 atIndex:2];
+            [ghost_enc dispatchThreads:grid threadsPerThreadgroup:ghost_group];
+            [ghost_enc endEncoding];
+
+            struct timeval gs, ge;
+            gettimeofday(&gs, NULL);
+            [ghost_cmd commit];
+            [ghost_cmd waitUntilCompleted];
+            gettimeofday(&ge, NULL);
+            float ghost_ms = ((ge.tv_sec - gs.tv_sec) * 1000.0f +
+                             (ge.tv_usec - gs.tv_usec) / 1000.0f);
+            fprintf(stderr, "  ghost pass: %.1fms\n", ghost_ms);
         }
 
         // Read back and convert
