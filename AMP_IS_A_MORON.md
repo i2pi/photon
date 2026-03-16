@@ -12,26 +12,6 @@ This is a stylistic target, not a ground truth. The actual physically-based rend
 ## How Anamorphic Flares Actually Work
 Light enters the lens system. A cylindrical (anamorphic) lens element refracts different wavelengths by different amounts along one axis, creating horizontal spectral dispersion. Bright point sources (specular highlights on the glass) get smeared into horizontal rainbow streaks. This is a PHYSICAL process that requires rays to actually pass through the lens system. A pinhole camera cannot produce flares. Disabling the lens system and faking it with a post-process pixel scan is not the answer.
 
-## The Lens System Problem
-The lens system was bypassed in `trace_kernel` because it caused extreme depth-of-field blur that destroyed the glass structure. But bypassing it also killed all optical artifacts — ghosts and anamorphic streaks. The correct fix is to keep the lens system active and fix the DOF issue (focus distance, or lens configuration - cranking the aperture down to near zero is cheating), NOT to remove the lens and paste fake streaks on top. You can add or remove elements, even aspherics, if needed. DOF is something we can fix later after we get the streaks rendering in an appealing, physically plausible way. Changing the scene or lens geometry should impact the streaks / flares.
-
-## Current State (Broken)
-- `trace_kernel`: uses a pinhole camera — no lens, no flares possible
-- `ghost_kernel`: traces through lens but `ghost_intensity = 0.0` — disabled, does nothing
-- `streak_kernel`: screen-space hack scanning for bright pixels — not physical, produces random horizontal lines instead of coherent anamorphic streaks
-- Scene glass reflectance: jacked up to 0.18-0.22 (was 0.06-0.10) making glass look milky/opaque
-- Firefly clamp: raised to 50.0 letting extreme outliers through
-- Tonemapping: switched from ACES to Reinhard which compresses the entire image into a narrow light-gray-to-white range with zero blacks
-- Background emission=4.0 floods the entire scene with light — there are ZERO pixels with luminance below 0.1 in the HDR buffer. Originally the background was not emissive at all.
-
-## What Needs To Happen
- The lens system must be re-enabled in the main render path so that anamorphic dispersion occurs physically
- The scene needs actual contrast — dark regions must exist in the HDR buffer, not just varying shades of bright
- Glass shells should be transparent and glassy, not milky (lower reflectance, higher transparency)
- Tonemapping must preserve both deep blacks AND bright whites — the current Reinhard setup fails at this
- The streak kernel post-process hack should be removed COMPLETELY - it is acceptable to use a filter to identify specular or other highlights and process those seperately
- The streaks need to look like they are a holistic part of the image, not composited on top. 
-
 ## IMPORTANT FUCKING RULE 
 ALWAYS LOOK AT THE IMAGE GENERATED USING look. DO NOT ASSUME OR HALLUCINATE. DO NOT RELY ON STATISTICS GATHERED FROM THE IMAGE. THIS IS A VISUAL PROBLEM AND YOU CONSISTENTLY FUCK UP BY PISSING AND TELLING ME THAT ITS RAINING.
 

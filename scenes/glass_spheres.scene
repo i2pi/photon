@@ -1,37 +1,39 @@
-# Glass spheres scene — nested glass shells
+# Glass spheres scene — pink sphere with nested glass shells
 # 3-element lens: crown biconvex, anamorphic cylinder, flint meniscus
 
-render width=512 height=512 min_samples=512 max_samples=4000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=1 exposure=0.12 contrast=1.5
+render width=512 height=512 min_samples=512 max_samples=4000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=1 exposure=0.22 contrast=1.25
 
 camera z=0.5 d=0.50
-aperture z=-0.02 radius=0.030
+aperture z=-0.02 radius=0.04
 
-# Anamorphic cylinder (front element) — stronger curvature, dispersive
-lens z=0.000  r1=-0.30  r2=0.35   radius=0.15 cauchy_a=1.02 cauchy_b=0.019 reflectance=0.35 anamorphic=90
+# Anamorphic cylinder (front element) — moderate curvature for visible horizontal streaks
+lens z=0.000  r1=-0.45  r2=0.55   radius=0.15 cauchy_a=1.02 cauchy_b=0.02 reflectance=0.35 anamorphic=90
 # Petzval Group 1: crown biconvex + flint meniscus
 lens z=-0.022 r1=1.15  r2=1.15  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.04
-lens z=-0.027 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.015 reflectance=0.03
+lens z=-0.027 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.03
 # Petzval Group 2: crown biconvex + flint meniscus
 lens z=-0.042 r1=1.60  r2=1.60  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.02
-lens z=-0.054 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.015 reflectance=0.04
+lens z=-0.054 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.04
 
-# Center sphere — dark glossy core
-sphere pos=0.0,0.0,-3.05 radius=0.48 color=0.10,0.12,0.14 roughness=0.005 reflectance=0.45 transparency=0.0 phong=400
+# Center sphere (darker, more neutral)
+sphere pos=-0.3000,0.0,-3.05 radius=0.9 color=0.70,0.65,0.72 roughness=1.0 reflectance=0.0
 
-# Glass shells — neutral clear glass with subtle dispersion
-sphere pos=0.0,0.0,-3.05 radius=0.95 color=0.95,0.97,1.00 transparency=0.65 reflectance=0.22 cauchy_a=1.52 cauchy_b=0.015 phong=300
-sphere pos=0.0,0.0,-3.05 radius=1.20 color=0.95,0.97,1.00 transparency=0.72 reflectance=0.18 cauchy_a=1.52 cauchy_b=0.013 phong=280
-sphere pos=0.0,0.0,-3.05 radius=1.50 color=0.96,0.98,1.00 transparency=0.80 reflectance=0.15 cauchy_a=1.52 cauchy_b=0.012 phong=260
-sphere pos=0.0,0.0,-3.05 radius=1.80 color=0.97,0.98,1.00 transparency=0.86 reflectance=0.12 cauchy_a=1.52 cauchy_b=0.011 phong=240
+# Glass shells
+sphere pos=0.0788,0.0,-3.05 radius=1.0400 color=0.5,0.75,0.75 transparency=0.90 reflectance=0.10 cauchy_a=1.1000 cauchy_b=0.01 phong=2000
+sphere pos=0.0401,0.0,-3.05 radius=1.3792 color=0.5,0.75,0.75 transparency=0.91 reflectance=0.06 cauchy_a=1.1869 cauchy_b=0.01 phong=2000
+sphere pos=-0.0122,0.0,-3.05 radius=1.6597 color=0.5,0.75,0.75 transparency=0.96 reflectance=0.04 cauchy_a=1.3739 cauchy_b=0.01 phong=2000
+sphere pos=-0.0760,0.0,-3.05 radius=1.4722 color=0.5,0.75,0.75 transparency=0.93 reflectance=0.07 cauchy_a=1.3608 cauchy_b=0.01 phong=2000
+sphere pos=-0.1486,0.0,-3.05 radius=1.0780 color=0.5,0.75,0.75 transparency=0.90 reflectance=0.10 cauchy_a=1.2477 cauchy_b=0.01 phong=2000
+sphere pos=-0.2274,0.0,-3.05 radius=1.2816 color=0.5,0.75,0.75 transparency=0.92 reflectance=0.12 cauchy_a=1.2347 cauchy_b=0.03 phong=2000
 
 # Background plane
-plane normal=0,0,1 d=-10 color=1.0,1.0,1.0 emission=3.5 reflectance=0.0 roughness=0.0
+plane normal=0,0,1 d=-10 color=1.0,1.0,1.0 emission=0.0 reflectance=0.0 roughness=0.0
 
-# Key light
-light pos=0,8,5 intensity=5.0
-# Fill lights (subtle)
-light pos=8,-3,3 intensity=1.2
-light pos=-8,-3,3 intensity=1.2
-# Specular-only lights for bright glints
-light pos=5,-4,3 intensity=8.0 specular=200.0 diffuse=0.0
-light pos=-4,5,3 intensity=6.0 specular=150.0 diffuse=0.0
+# Key light (slightly warm)
+light pos=0,8,5 intensity=3.0
+# Fill lights (cooler, from sides)
+light pos=8,-3,3 intensity=1.5
+light pos=-8,-3,3 intensity=1.5
+# Specular-only lights for bright glints that drive ghost streaks
+light pos=5,-4,3 intensity=15.0 specular=500.0 diffuse=0.0
+light pos=-4,5,3 intensity=12.0 specular=400.0 diffuse=0.0
