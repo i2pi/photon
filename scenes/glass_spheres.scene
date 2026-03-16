@@ -7,10 +7,9 @@ camera z=0.595 d=0.455
 aperture z=-0.05 radius=0.04
 
 # Front anamorphic cylinder: weak power, provides streak asymmetry and ghost pairs
-lens z=0.020  r1=1.80  r2=2.00  radius=0.30 cauchy_a=1.50 cauchy_b=0.021 reflectance=0.04 anamorphic=90
-# Best-form imaging lens: optimal shape for minimum spherical aberration
-# q=0.77, r1=0.295 (steep, sensor-facing), r2=2.24 (gentle, scene-facing), f=0.498
-lens z=0.000  r1=0.295  r2=2.24  radius=0.25 cauchy_a=1.523 cauchy_b=0.006 reflectance=0.02
+lens z=0.020  r1=1.80  r2=2.00  radius=0.25 cauchy_a=1.50 cauchy_b=0.021 reflectance=0.04 anamorphic=90
+# Imaging lens: biconvex, f=0.498
+lens z=0.000  r1=0.52  r2=0.52  radius=0.22 cauchy_a=1.523 cauchy_b=0.006 reflectance=0.02
 # Rear element: low-power meniscus for additional ghost surface pairs
 lens z=-0.035  r1=1.50  r2=1.80  radius=0.25 cauchy_a=1.223 cauchy_b=0.01 reflectance=0.01
 
