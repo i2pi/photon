@@ -1224,7 +1224,7 @@ kernel void ghost_kernel(
                             if (surf.phong > 1.0 && refl_cos > 0 && spec_mult > 0) {
                                 // Use phong exponent of 50 for ghost (broad, smooth lobe)
                                 // vs phong=2000 for main render (tight glint point)
-                                float ghost_phong_exp = 50.0;
+                                float ghost_phong_exp = 200.0;
                                 float spec_val = pow(refl_cos, ghost_phong_exp);
                                 float n_ior = surf.cauchy_a;
                                 float f0 = ((n_ior - 1.0) / (n_ior + 1.0)) * ((n_ior - 1.0) / (n_ior + 1.0));
@@ -1252,7 +1252,7 @@ kernel void ghost_kernel(
     // ghost_boost compensates for physically perfect AR coatings that 
     // suppress ghost reflections more than desired artistically
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 15.0;
+    float ghost_boost = 25.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
