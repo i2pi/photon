@@ -4,9 +4,9 @@
 render width=512 height=512 min_samples=16 max_samples=2000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=0 exposure=0.60 contrast=1.05 saturation=1.00
 
 camera z=0.595 d=0.455
-aperture z=-0.05 radius=0.04
+aperture z=-0.05 radius=0.06
 
-# Biconvex crown lens (n=1.523): 1/f=1/0.595+1/3.05→f=0.498, R=2*(n-1)*f=0.521
+# Single biconvex crown lens, f≈0.498 focused on glass spheres at z=-3.05
 lens z=0.000  r1=0.52  r2=0.52  radius=0.16 cauchy_a=1.523 cauchy_b=0.006 reflectance=0.02
 
 # Center sphere 
