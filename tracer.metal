@@ -1190,18 +1190,18 @@ kernel void ghost_kernel(
                     float3 surf_color = float3(surf.color_r, surf.color_g, surf.color_b);
                     float3 ghost_contrib = float3(0);
 
-                    // Emissive contribution (reduced weight — ghosts are primarily from specular highlights)
+                    // Emissive contribution (full weight for ghost streaks)
                     if (surf.emission > 0) {
                         debug_emissive_hits += 1.0;
-                        ghost_contrib += surf_color * surf.emission * 0.05;
+                        ghost_contrib += surf_color * surf.emission;
                     }
 
-                    // Ghost evaluates what the main camera would see at this hit point.
-                    // Use canonical view direction for specular (same as main camera)
-                    // Include both diffuse and specular for smooth, low-variance ghost signal
+                    // Ghost specular: use ghost ray view direction (not canonical camera view)
+                    // so the anamorphic optical distortion shapes the specular response.
+                    // No diffuse — ghosts should only carry bright highlights, not broad illumination.
                     if (surf.is_lens < 0.5) {
-                        float3 canonical_view = normalize(hit_point - float3(0, 0, scene.camera.cam_z));
-                        float3 refl_view = canonical_view - 2.0 * dot(canonical_view, normal) * normal;
+                        float3 ghost_view = normalize(ghost_dir);
+                        float3 refl_view = ghost_view - 2.0 * dot(ghost_view, normal) * normal;
 
                         for (int li = 0; li < scene.num_lights; li++) {
                             float3 lp = float3(scene.lights[li].px,
@@ -1215,25 +1215,18 @@ kernel void ghost_kernel(
                             float light_dist = length(lp - hit_point);
                             float atten = 1.0 / (1.0 + light_dist * 0.0001);
 
-                            // Diffuse contribution (weighted down)
-                            float diffuse = max(dot(normal, incidence), 0.0f);
-                            float diff_term = (1.0 - surf.transparency) * diffuse * 0.3 * scene.lights[li].diffuse_mult;
-                            ghost_contrib += diff_term * surf_color * lc * atten;
-                            // Specular contribution
+                            // Specular contribution — use wider cone for ghost evaluation
+                            // Ghost rays sample the scene sparsely so we need a wider
+                            // angular acceptance to collect highlight energy
                             float refl_cos = dot(refl_view, incidence);
                             float spec_mult = scene.lights[li].specular;
-                            if (surf.phong > 1.0 && refl_cos > 0 && spec_mult > 0) {
-                                float glint_size = 1.0 / surf.phong;
-                                float effective_mult = spec_mult;
-                                if (refl_cos > (1.0 - glint_size)) {
-                                    float t_val = (refl_cos - (1.0 - glint_size)) / glint_size;
-                                    float n_ior = surf.cauchy_a;
-                                    float f0 = ((n_ior - 1.0) / (n_ior + 1.0)) * ((n_ior - 1.0) / (n_ior + 1.0));
-                                    float cos_i = max(dot(normal, incidence), 0.0f);
-                                    float fresnel = f0 + (1.0 - f0) * pow(1.0 - cos_i, 5.0);
-                                    ghost_contrib += t_val * t_val * fresnel * effective_mult * lc * atten;
-                                    debug_glint_hits += 1.0;
-                                }
+                            float diff_mult = scene.lights[li].diffuse_mult;
+                            if (refl_cos > 0) {
+                                // Wide specular lobe for ghost (Blinn-Phong-like with moderate exponent)
+                                float ghost_phong = min(surf.phong, 50.0f);
+                                float spec_val = pow(refl_cos, ghost_phong) * spec_mult;
+                                ghost_contrib += spec_val * lc * atten;
+                                if (spec_val > 0.01) debug_glint_hits += 1.0;
                             }
                         }
                     }
@@ -1251,7 +1244,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 8.0;
+    float ghost_boost = 10.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
