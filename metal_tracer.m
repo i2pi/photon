@@ -81,6 +81,7 @@ static id<MTLDevice>              mtl_device;
 static id<MTLCommandQueue>        mtl_queue;
 static id<MTLComputePipelineState> mtl_pipeline;
 static id<MTLComputePipelineState> mtl_ghost_pipeline;
+static id<MTLComputePipelineState> mtl_detect_bright_pipeline;
 static int gpu_ready = 0;
 
 int gpu_init(void) {
@@ -142,6 +143,15 @@ int gpu_init(void) {
             mtl_ghost_pipeline = [mtl_device newComputePipelineStateWithFunction:ghost_fn error:&error];
             if (!mtl_ghost_pipeline) {
                 fprintf(stderr, "Metal: ghost pipeline error: %s\n",
+                        [[error localizedDescription] UTF8String]);
+            }
+        }
+
+        id<MTLFunction> detect_fn = [library newFunctionWithName:@"detect_bright_kernel"];
+        if (detect_fn) {
+            mtl_detect_bright_pipeline = [mtl_device newComputePipelineStateWithFunction:detect_fn error:&error];
+            if (!mtl_detect_bright_pipeline) {
+                fprintf(stderr, "Metal: detect_bright pipeline error: %s\n",
                         [[error localizedDescription] UTF8String]);
             }
         }
@@ -453,34 +463,71 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             }
         }
 
-        // Dispatch ghost kernel (single pass, fixed sample count)
-        if (ghost_rays && mtl_ghost_pipeline) {
+        // Dispatch source-driven ghost/streak system
+        if (ghost_rays && mtl_ghost_pipeline && mtl_detect_bright_pipeline) {
             size_t ghost_size = sizeof(float) * width * height * 3;
             id<MTLBuffer> ghost_buf = [mtl_device newBufferWithLength:ghost_size
-                                                              options:MTLResourceStorageModeShared];
+                                                               options:MTLResourceStorageModeShared];
             memset([ghost_buf contents], 0, ghost_size);
 
-            NSUInteger gw = [mtl_ghost_pipeline threadExecutionWidth];
-            NSUInteger gh = [mtl_ghost_pipeline maxTotalThreadsPerThreadgroup] / gw;
-            MTLSize ghost_group = MTLSizeMake(gw, gh, 1);
+            // Bright source detection buffers
+            id<MTLBuffer> bright_count_buf = [mtl_device newBufferWithLength:sizeof(int)
+                                                                     options:MTLResourceStorageModeShared];
+            memset([bright_count_buf contents], 0, sizeof(int));
 
-            id<MTLCommandBuffer> ghost_cmd = [mtl_queue commandBuffer];
-            id<MTLComputeCommandEncoder> ghost_enc = [ghost_cmd computeCommandEncoder];
-            [ghost_enc setComputePipelineState:mtl_ghost_pipeline];
-            [ghost_enc setBuffer:scene_buf offset:0 atIndex:0];
-            [ghost_enc setBuffer:output_buf offset:0 atIndex:1];
-            [ghost_enc setBuffer:ghost_buf offset:0 atIndex:2];
-            [ghost_enc dispatchThreads:grid threadsPerThreadgroup:ghost_group];
-            [ghost_enc endEncoding];
+            size_t bright_src_size = sizeof(float) * 64 * 5;  // MAX_BRIGHT_SOURCES * 5
+            id<MTLBuffer> bright_src_buf = [mtl_device newBufferWithLength:bright_src_size
+                                                                   options:MTLResourceStorageModeShared];
+            memset([bright_src_buf contents], 0, bright_src_size);
 
-            struct timeval gs, ge;
-            gettimeofday(&gs, NULL);
-            [ghost_cmd commit];
-            [ghost_cmd waitUntilCompleted];
-            gettimeofday(&ge, NULL);
-            float ghost_ms = ((ge.tv_sec - gs.tv_sec) * 1000.0f +
-                             (ge.tv_usec - gs.tv_usec) / 1000.0f);
-            fprintf(stderr, "  ghost pass: %.1fms\n", ghost_ms);
+            // Phase 1: Detect bright pixels
+            {
+                NSUInteger dw = [mtl_detect_bright_pipeline threadExecutionWidth];
+                NSUInteger dh = [mtl_detect_bright_pipeline maxTotalThreadsPerThreadgroup] / dw;
+                MTLSize detect_group = MTLSizeMake(dw, dh, 1);
+
+                id<MTLCommandBuffer> detect_cmd = [mtl_queue commandBuffer];
+                id<MTLComputeCommandEncoder> detect_enc = [detect_cmd computeCommandEncoder];
+                [detect_enc setComputePipelineState:mtl_detect_bright_pipeline];
+                [detect_enc setBuffer:scene_buf offset:0 atIndex:0];
+                [detect_enc setBuffer:output_buf offset:0 atIndex:1];
+                [detect_enc setBuffer:bright_count_buf offset:0 atIndex:2];
+                [detect_enc setBuffer:bright_src_buf offset:0 atIndex:3];
+                [detect_enc dispatchThreads:grid threadsPerThreadgroup:detect_group];
+                [detect_enc endEncoding];
+                [detect_cmd commit];
+                [detect_cmd waitUntilCompleted];
+
+                int *bc = (int *)[bright_count_buf contents];
+                fprintf(stderr, "  bright sources detected: %d\n", *bc);
+            }
+
+            // Phase 2: Streak kernel
+            {
+                NSUInteger gw = [mtl_ghost_pipeline threadExecutionWidth];
+                NSUInteger gh = [mtl_ghost_pipeline maxTotalThreadsPerThreadgroup] / gw;
+                MTLSize ghost_group = MTLSizeMake(gw, gh, 1);
+
+                id<MTLCommandBuffer> ghost_cmd = [mtl_queue commandBuffer];
+                id<MTLComputeCommandEncoder> ghost_enc = [ghost_cmd computeCommandEncoder];
+                [ghost_enc setComputePipelineState:mtl_ghost_pipeline];
+                [ghost_enc setBuffer:scene_buf offset:0 atIndex:0];
+                [ghost_enc setBuffer:output_buf offset:0 atIndex:1];
+                [ghost_enc setBuffer:ghost_buf offset:0 atIndex:2];
+                [ghost_enc setBuffer:bright_count_buf offset:0 atIndex:3];
+                [ghost_enc setBuffer:bright_src_buf offset:0 atIndex:4];
+                [ghost_enc dispatchThreads:grid threadsPerThreadgroup:ghost_group];
+                [ghost_enc endEncoding];
+
+                struct timeval gs, ge;
+                gettimeofday(&gs, NULL);
+                [ghost_cmd commit];
+                [ghost_cmd waitUntilCompleted];
+                gettimeofday(&ge, NULL);
+                float ghost_ms = ((ge.tv_sec - gs.tv_sec) * 1000.0f +
+                                 (ge.tv_usec - gs.tv_usec) / 1000.0f);
+                fprintf(stderr, "  ghost/streak pass: %.1fms\n", ghost_ms);
+            }
         }
 
         // Read back and convert

@@ -1055,151 +1055,175 @@ kernel void trace_kernel(
     output[idx + 2] = B * inv_n;
 }
 
-// --- Separate ghost kernel: runs once with fixed sample count ---
-// Ghost rays only vary by wavelength (no DOF), so 32 spectral samples suffice.
+// --- Source-driven ghost/streak kernel ---
+// Phase 1: Detect bright glint pixels in the main render output.
+// Phase 2: For each pixel, compute streak contribution from each bright source
+//          using the anamorphic lens PSF (derived from actual lens geometry).
+//
+// The anamorphic cylindrical element scatters light anisotropically:
+// wide perpendicular to the cylinder axis, tight along it.
+// This produces the characteristic horizontal streak from each bright source.
 
+#define MAX_BRIGHT_SOURCES 64
 #define GHOST_SAMPLES 32
 
-kernel void ghost_kernel(
+// Phase 1: find bright pixels and store them
+kernel void detect_bright_kernel(
     constant GPUScene &scene [[buffer(0)]],
     device float *output [[buffer(1)]],
-    device float *ghost_buf [[buffer(2)]],
+    device atomic_int *bright_count [[buffer(2)]],
+    device float *bright_sources [[buffer(3)]],  // [x, y, R, G, B] per source
     uint2 gid [[thread_position_in_grid]]
 ) {
     int x = gid.x;
     int y = gid.y;
     int width = scene.width;
     int height = scene.height;
-
     if (x >= width || y >= height) return;
-    if (!scene.ghost_rays || scene.camera.num_ghost_pairs <= 0) return;
+
+    int idx = (y * width + x) * 3;
+    float r = output[idx + 0];
+    float g = output[idx + 1];
+    float b = output[idx + 2];
+    float lum = r + g + b;
+
+    // Threshold: detect bright specular glints (averaged pixel values)
+    if (lum > 15.0) {
+        int slot = atomic_fetch_add_explicit(bright_count, 1, memory_order_relaxed);
+        if (slot < MAX_BRIGHT_SOURCES) {
+            int si = slot * 5;
+            bright_sources[si + 0] = float(x);
+            bright_sources[si + 1] = float(y);
+            bright_sources[si + 2] = r;
+            bright_sources[si + 3] = g;
+            bright_sources[si + 4] = b;
+        }
+    }
+}
+
+// Phase 2: For each pixel, accumulate streak contributions from bright sources.
+// The streak shape is derived from the anamorphic lens element properties:
+// - The cylinder axis direction determines the streak orientation
+// - The cylinder curvature determines the streak width
+// - Chromatic dispersion from the lens produces spectral fringing
+kernel void ghost_kernel(
+    constant GPUScene &scene [[buffer(0)]],
+    device float *output [[buffer(1)]],
+    device float *ghost_buf [[buffer(2)]],
+    device int *bright_count_buf [[buffer(3)]],
+    device float *bright_sources [[buffer(4)]],
+    uint2 gid [[thread_position_in_grid]]
+) {
+    int x = gid.x;
+    int y = gid.y;
+    int width = scene.width;
+    int height = scene.height;
+    if (x >= width || y >= height) return;
+    if (!scene.ghost_rays) return;
+
+    int num_bright = bright_count_buf[0];
+    if (num_bright <= 0) return;
+    if (num_bright > MAX_BRIGHT_SOURCES) num_bright = MAX_BRIGHT_SOURCES;
 
     uint pixel_idx = y * width + x;
 
-    float X = 2.0 * (0.5 - (float(x) / float(width)));
-    float Y = 2.0 * (0.5 - (float(y) / float(height)));
-    float aspect = float(width) / float(height);
+    // Find anamorphic element properties for streak shape
+    float streak_angle_deg = 0;
+    bool has_anamorphic = false;
+    float anamorphic_dispersion = 0;
+    for (int e = 0; e < scene.camera.num_lenses; e++) {
+        if (scene.camera.lenses[e].anamorphic > 0.5) {
+            streak_angle_deg = scene.camera.lenses[e].anamorphic;
+            anamorphic_dispersion = scene.camera.lenses[e].cauchy_b;
+            has_anamorphic = true;
+            break;
+        }
+    }
+    if (!has_anamorphic) return;
 
-    float3 sensor_origin = float3(
-        scene.camera.cam_d * X * aspect,
-        scene.camera.cam_d * Y,
-        scene.camera.cam_z
-    );
+    // Streak direction: perpendicular to cylinder axis in screen space
+    // anamorphic=90 means cylinder axis along y, so streak extends in x (horizontal)
+    float theta = streak_angle_deg * (M_PI_F / 180.0);
+    // Cylinder axis is (cos(theta), sin(theta)) in x-y plane
+    // Streak direction is perpendicular: (-sin(theta), cos(theta))
+    float2 streak_dir = float2(-sin(theta), cos(theta));
 
     float3 spec_norm = float3(scene.spec_norm_r, scene.spec_norm_g, scene.spec_norm_b);
-    float3 ghost_lens_center = float3(0, 0, scene.camera.lenses[0].z);
-    float3 ghost_ray_dir = normalize(ghost_lens_center - sensor_origin);
 
-    // Fixed per-pixel RNG for wavelength Cranley-Patterson offset
+    // Per-pixel RNG for spectral sampling
     RNG pixel_rng(scene.frame_seed ^ pixel_idx * 1973u ^ uint(x) * 9277u ^ uint(y) * 6581u);
     float pixel_rand_w = pixel_rng.uniform();
 
     float ghost_R = 0, ghost_G = 0, ghost_B = 0;
 
-    for (int i = 0; i < GHOST_SAMPLES; i++) {
-        float wavelength = 380.0 + 400.0 * fract(float(i) * 0.6180339887 + pixel_rand_w);
+    for (int si = 0; si < num_bright; si++) {
+        int bi = si * 5;
+        float sx = bright_sources[bi + 0];
+        float sy = bright_sources[bi + 1];
+        float sr = bright_sources[bi + 2];
+        float sg = bright_sources[bi + 3];
+        float sb = bright_sources[bi + 4];
+        float src_lum = sr + sg + sb;
 
-        for (int p = 0; p < scene.camera.num_ghost_pairs; p++) {
-            int s1 = scene.camera.ghost_pairs[p * 2];
-            int s2 = scene.camera.ghost_pairs[p * 2 + 1];
+        // Vector from source pixel to this pixel
+        float dx = float(x) - sx;
+        float dy = float(y) - sy;
 
-            float3 ghost_origin, ghost_dir;
-            float gw = ray_ghost_through_lens(
-                sensor_origin, ghost_ray_dir,
-                scene.camera, wavelength, s1, s2,
-                ghost_origin, ghost_dir);
+        // Project displacement onto streak direction and perpendicular
+        float along_streak = dx * streak_dir.x + dy * streak_dir.y;
+        float perp_streak = dx * (-streak_dir.y) + dy * streak_dir.x;
 
-            if (gw > 0.0001) {
-                // Find nearest sphere intersection
-                float nearest_t = 1e30;
-                int nearest_si = -1;
-                for (int si = 0; si < scene.num_spheres; si++) {
-                    float3 sc = float3(scene.spheres[si].cx,
-                                       scene.spheres[si].cy,
-                                       scene.spheres[si].cz);
-                    float sr = scene.spheres[si].radius;
-                    float3 oc = ghost_origin - sc;
-                    float gb = dot(oc, ghost_dir);
-                    float gc_disc = gb * gb - (dot(oc, oc) - sr * sr);
-                    if (gc_disc <= 0) continue;
-                    float gt = -gb - sqrt(gc_disc);
-                    if (gt > 0.001 && gt < nearest_t) {
-                        nearest_t = gt;
-                        nearest_si = si;
-                    }
-                }
-                if (nearest_si >= 0) {
-                    int si = nearest_si;
-                    float gt = nearest_t;
-                    float3 sc = float3(scene.spheres[si].cx,
-                                       scene.spheres[si].cy,
-                                       scene.spheres[si].cz);
-                    float sr = scene.spheres[si].radius;
+        // Streak profile: tight perpendicular (Gaussian), wide along streak
+        // The streak width along the axis scales with source brightness
+        float perp_sigma = 2.0;  // tight perpendicular falloff (pixels)
+        float along_scale = max(src_lum * 2.0, 50.0);  // streak length scales with brightness
+        float perp_weight = exp(-0.5 * (perp_streak * perp_streak) / (perp_sigma * perp_sigma));
+        float along_dist = abs(along_streak);
 
-                    if (scene.spheres[si].emission >= 1.0) {
-                        // Direct hit on emissive sphere
-                        float3 gc = float3(scene.spheres[si].color_r,
-                                           scene.spheres[si].color_g,
-                                           scene.spheres[si].color_b);
-                        gc *= scene.spheres[si].emission * gw;
-                        gc *= wavelength_to_rgb(wavelength, spec_norm);
-                        ghost_R += gc.r;
-                        ghost_G += gc.g;
-                        ghost_B += gc.b;
-                    } else if (scene.spheres[si].is_lens < 0.5 && scene.spheres[si].phong > 1.0) {
-                        // Scene glass object: compute specular lighting at hit point
-                        // to find if this is a glint location (same calculation as main kernel)
-                        float3 hit_pt = ghost_origin + gt * ghost_dir;
-                        float3 hit_n = normalize(hit_pt - sc);
+        if (perp_weight < 0.01 || along_dist < 1.0) continue;  // skip center (already rendered) and negligible
 
-                        // Compute specular from lights (same as trace_ray direct lighting)
-                        float3 canonical_view = normalize(hit_pt - float3(0, 0, scene.camera.cam_z));
-                        float3 refl_view = canonical_view - 2.0 * dot(canonical_view, hit_n) * hit_n;
+        // Along-streak falloff: 1/distance for long tail
+        float along_weight = along_scale / (along_dist * along_dist + along_scale);
 
-                        float n_ior = scene.spheres[si].cauchy_a;
-                        float f0 = ((n_ior - 1.0) / (n_ior + 1.0)) * ((n_ior - 1.0) / (n_ior + 1.0));
+        float total_weight = perp_weight * along_weight;
+        if (total_weight < 0.0001) continue;
 
-                        for (int li = 0; li < scene.num_lights; li++) {
-                            float3 lp = float3(scene.lights[li].px,
-                                               scene.lights[li].py,
-                                               scene.lights[li].pz);
-                            float3 to_light = normalize(lp - hit_pt);
-                            float refl_cos = dot(refl_view, to_light);
+        // Spectral sampling: chromatic fringing along the streak
+        // Different wavelengths are displaced differently by the anamorphic element
+        for (int wi = 0; wi < 8; wi++) {
+            float wavelength = 380.0 + 400.0 * fract(float(wi) * 0.6180339887 + pixel_rand_w);
 
-                            float glint_size = 1.0 / scene.spheres[si].phong;
-                            if (refl_cos > (1.0 - glint_size)) {
-                                float t_val = (refl_cos - (1.0 - glint_size)) / glint_size;
-                                float cos_i = max(dot(hit_n, to_light), 0.0f);
-                                float fresnel = f0 + (1.0 - f0) * pow(1.0 - cos_i, 5.0);
-                                float spec_mult = scene.lights[li].specular;
-                                float effective_mult = spec_mult;
-                                float light_dist = length(lp - hit_pt);
-                                float atten = 1.0 / (1.0 + light_dist * 0.0001);
+            // Chromatic shift: shorter wavelengths displaced more
+            // (higher refractive index from Cauchy dispersion)
+            float ref_wl = 550.0;  // reference wavelength
+            float wl_shift = (ref_wl - wavelength) / 400.0;  // normalized [-0.425, +0.425]
+            float chromatic_offset = wl_shift * anamorphic_dispersion * 800.0;
 
-                                float3 lc = float3(scene.lights[li].color_r,
-                                                   scene.lights[li].color_g,
-                                                   scene.lights[li].color_b);
-                                float3 gc = lc * atten * t_val * t_val * fresnel * effective_mult * gw;
-                                gc *= wavelength_to_rgb(wavelength, spec_norm);
-                                ghost_R += gc.r;
-                                ghost_G += gc.g;
-                                ghost_B += gc.b;
-                            }
-                        }
-                    }
-                }
-            }
+            // Effective along-streak position for this wavelength
+            float effective_along = along_streak - chromatic_offset;
+            float eff_dist = abs(effective_along);
+            float eff_along_weight = along_scale / (eff_dist * eff_dist + along_scale);
+            float eff_total = perp_weight * eff_along_weight;
+
+            if (eff_total < 0.0001) continue;
+
+            float3 wl_color = wavelength_to_rgb(wavelength, spec_norm);
+            // Streak intensity
+            float ghost_strength = 0.5;
+            float3 contrib = src_lum * ghost_strength * eff_total * wl_color;
+
+            ghost_R += contrib.r;
+            ghost_G += contrib.g;
+            ghost_B += contrib.b;
         }
     }
 
-    // Write ghost average to ghost buffer
-    float ginv = 1.0 / float(GHOST_SAMPLES);
+    float ginv = 1.0 / 8.0;  // normalize by spectral sample count
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = ghost_R * ginv;
     ghost_buf[gidx + 1] = ghost_G * ginv;
     ghost_buf[gidx + 2] = ghost_B * ginv;
 
-    // Add ghost to main output
     output[gidx + 0] += ghost_R * ginv;
     output[gidx + 1] += ghost_G * ginv;
     output[gidx + 2] += ghost_B * ginv;
