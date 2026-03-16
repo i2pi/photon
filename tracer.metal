@@ -1097,8 +1097,8 @@ kernel void ghost_kernel(
     float dof_radius = scene.camera.lenses[0].radius;
     for (int le = 1; le < scene.camera.num_lenses; le++)
         dof_radius = min(dof_radius, scene.camera.lenses[le].radius);
-    // Clamp to a reasonable flare pupil size (don't use tiny beauty aperture)
-    float ghost_pupil = min(dof_radius, 0.04f);
+    // Use full lens clear aperture for ghost paths — larger pupil = longer streaks
+    float ghost_pupil = dof_radius;
 
     // Per-pixel RNG for Cranley-Patterson rotation offsets
     RNG pixel_rng(scene.frame_seed ^ pixel_idx * 1973u ^ uint(x) * 9277u ^ uint(y) * 6581u);
@@ -1243,7 +1243,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 5.0;
+    float ghost_boost = 0.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
@@ -1313,108 +1313,105 @@ kernel void flare_kernel(
         glint_pos = best_center + best_radius * h;
     }
 
-    // Sample entry point on the back (scene-side) lens element
-    int back_idx = scene.camera.num_lenses - 1;
-    constant GPULensElement &back = scene.camera.lenses[back_idx];
-    float lens_radius = back.radius;
+    // Find the cylinder element
+    int cyl_idx = -1;
+    for (int e = 0; e < scene.camera.num_lenses; e++) {
+        if (scene.camera.lenses[e].anamorphic > 0.5) { cyl_idx = e; break; }
+    }
+    if (cyl_idx < 0) return;
+    constant GPULensElement &cyl = scene.camera.lenses[cyl_idx];
+
+    // Sample entry on the cylinder's aperture
+    float lens_radius = cyl.radius;
     float angle = 2.0 * M_PI_F * rng.uniform();
     float rad = lens_radius * sqrt(rng.uniform());
-    float3 lens_point = float3(rad * cos(angle), rad * sin(angle), back.z);
+    float3 lens_point = float3(rad * cos(angle), rad * sin(angle), cyl.z);
 
     float3 dir = normalize(lens_point - glint_pos);
     float3 pos = lens_point;
 
-    // Weight: irradiance at lens from point source
+    // Weight
     float glint_dist = length(lens_point - glint_pos);
     float cos_angle = max(abs(dir.z), 0.1f);
-    float streak_boost = 1.0;
+    float streak_boost = 5000.0;
     float weight = spec_mult * cos_angle * M_PI_F * lens_radius * lens_radius
                    * streak_boost / (glint_dist * glint_dist * float(samples_per_light));
 
-    float current_ri = 1.0;
+    float cyl_ang = cyl.anamorphic;
+    float ri = cauchy_ri(cyl.cauchy_a, cyl.cauchy_b, wavelength);
+    float R_sq = cyl.radius * cyl.radius;
 
-    // Trace through ALL lens elements via pure transmission (no reflections)
-    float z_front = scene.camera.lenses[0].z;
-    float z_back = scene.camera.lenses[scene.camera.num_lenses - 1].z;
-    float z_margin = abs(z_front - z_back) + 0.5;
-    float z_max = max(z_front, z_back) + z_margin;
-    float z_min = min(z_front, z_back) - z_margin;
+    // Trace through the cylinder's two surfaces only (cylinder-only transmission)
+    // Back surface first (scene-facing, since the cylinder is the frontmost element
+    // and the ray comes from the scene at negative z toward positive z)
+    // Actually the cylinder is at z=0, the scene is at z=-3. The ray goes from
+    // z=-1.5 toward z=0 (+z direction). It enters the cylinder back surface first.
+    
+    // The cylinder geometry: front_center_z and back_center_z are both at ~z=0.37 and z=0.43
+    // The actual cylinder surfaces intersect the optical axis near z=0 (the lens z position)
 
-    for (int bounce = 0; bounce < 32; bounce++) {
+    // Use the full lens traversal but ONLY for the cylinder element
+    float z_margin = 1.0;
+    float z_min = cyl.z - z_margin;
+    float z_max = cyl.z + z_margin;
+
+    for (int bounce = 0; bounce < 8; bounce++) {
         if (weight < 1e-10) break;
 
         float nearest_t = 1e30;
         float3 nearest_isect;
         float3 nearest_normal;
-        int nearest_elem = -1;
-        float nearest_ri = 1.0;
+        float nearest_ri = ri;
+        bool found = false;
 
-        for (int e = 0; e < scene.camera.num_lenses; e++) {
-            constant GPULensElement &elem = scene.camera.lenses[e];
-            float R_sq = elem.radius * elem.radius;
-            float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
-            bool is_cyl = (elem.anamorphic > 0.5);
-            float cyl_ang = elem.anamorphic;
-
-            float abs_r1 = abs(elem.r1);
-            float fc_z = elem.front_center_z;
-            float t0, t1;
-            if (is_cyl) ray_cylinder_t(fc_z, abs_r1, cyl_ang, pos, dir, t0, t1);
-            else ray_sphere_t(float3(0, 0, fc_z), abs_r1, pos, dir, t0, t1);
-            for (int hh = 0; hh < 2; hh++) {
-                float t = (hh == 0) ? t0 : t1;
-                if (t <= LENS_EPS || t >= nearest_t) continue;
-                float3 isect = pos + t * dir;
-                if (isect.z < z_min || isect.z > z_max) continue;
-                if (isect.x * isect.x + isect.y * isect.y > R_sq) continue;
-                float3 normal = is_cyl ? cylinder_normal(isect, fc_z, cyl_ang)
-                                       : normalize(isect - float3(0, 0, fc_z));
-                nearest_t = t; nearest_isect = isect; nearest_normal = normal;
-                nearest_elem = e; nearest_ri = ri;
-            }
-
-            float abs_r2 = abs(elem.r2);
-            float bc_z = elem.back_center_z;
-            if (is_cyl) ray_cylinder_t(bc_z, abs_r2, cyl_ang, pos, dir, t0, t1);
-            else ray_sphere_t(float3(0, 0, bc_z), abs_r2, pos, dir, t0, t1);
-            for (int hh = 0; hh < 2; hh++) {
-                float t = (hh == 0) ? t0 : t1;
-                if (t <= LENS_EPS || t >= nearest_t) continue;
-                float3 isect = pos + t * dir;
-                if (isect.z < z_min || isect.z > z_max) continue;
-                if (isect.x * isect.x + isect.y * isect.y > R_sq) continue;
-                float3 normal = is_cyl ? cylinder_normal(isect, bc_z, cyl_ang)
-                                       : normalize(isect - float3(0, 0, bc_z));
-                nearest_t = t; nearest_isect = isect; nearest_normal = normal;
-                nearest_elem = e; nearest_ri = ri;
-            }
+        // Front surface
+        float abs_r1 = abs(cyl.r1);
+        float fc_z = cyl.front_center_z;
+        float t0, t1;
+        ray_cylinder_t(fc_z, abs_r1, cyl_ang, pos, dir, t0, t1);
+        for (int hh = 0; hh < 2; hh++) {
+            float t = (hh == 0) ? t0 : t1;
+            if (t <= LENS_EPS || t >= nearest_t) continue;
+            float3 isect = pos + t * dir;
+            if (isect.z < z_min || isect.z > z_max) continue;
+            if (isect.x * isect.x + isect.y * isect.y > R_sq) continue;
+            float3 normal = cylinder_normal(isect, fc_z, cyl_ang);
+            nearest_t = t; nearest_isect = isect; nearest_normal = normal;
+            found = true;
         }
 
-        if (nearest_elem < 0) {
-            // Ray exits lens toward sensor
-            if (dir.z <= 0) break;
-            break;  // will handle sensor intersection below
+        // Back surface
+        float abs_r2 = abs(cyl.r2);
+        float bc_z = cyl.back_center_z;
+        ray_cylinder_t(bc_z, abs_r2, cyl_ang, pos, dir, t0, t1);
+        for (int hh = 0; hh < 2; hh++) {
+            float t = (hh == 0) ? t0 : t1;
+            if (t <= LENS_EPS || t >= nearest_t) continue;
+            float3 isect = pos + t * dir;
+            if (isect.z < z_min || isect.z > z_max) continue;
+            if (isect.x * isect.x + isect.y * isect.y > R_sq) continue;
+            float3 normal = cylinder_normal(isect, bc_z, cyl_ang);
+            nearest_t = t; nearest_isect = isect; nearest_normal = normal;
+            found = true;
         }
 
-        // Pure transmission: always refract, weight by transmittance
-        bool entering = (current_ri < 1.01);
-        float n1 = current_ri;
-        float n2 = entering ? nearest_ri : 1.0;
+        if (!found) break;
+
+        // Refract through surface
+        bool entering = (bounce == 0 || bounce == 2);  // entering glass on first hit
+        float n1 = entering ? 1.0 : ri;
+        float n2 = entering ? ri : 1.0;
         float cos_i = abs(dot(dir, nearest_normal));
         float fresnel_r = fresnel_schlick(cos_i, n1, n2);
-        float surf_refl = scene.camera.lenses[nearest_elem].reflectance;
-        fresnel_r = fresnel_r + surf_refl * (1.0 - fresnel_r);
-
         weight *= (1.0 - fresnel_r);
         if (weight < 1e-10) break;
 
         float3 n = (dot(dir, nearest_normal) < 0) ? nearest_normal : -nearest_normal;
         float eta = n1 / n2;
         float3 refracted = refract(dir, n, eta);
-        if (length(refracted) < 0.001) break;  // TIR → kill
+        if (length(refracted) < 0.001) break;
         dir = refracted;
         pos = nearest_isect;
-        current_ri = n2;
     }
 
     if (weight < 1e-10 || dir.z <= 0) return;
