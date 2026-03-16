@@ -1139,13 +1139,46 @@ kernel void ghost_kernel(
                 debug_exits += 1.0;
                 debug_max_gw = max(debug_max_gw, gw);
 
-                // Find nearest scene intersection (spheres + planes)
+                // Ghost source model: check if ghost ray direction points toward
+                // bright light sources. The anamorphic cylinder creates a mapping
+                // where different sensor pixels see the same light through the ghost
+                // path — the asymmetric mapping creates the horizontal streak.
+                float3 ghost_contrib = float3(0);
+
+                for (int li = 0; li < scene.num_lights; li++) {
+                    float3 lp = float3(scene.lights[li].px,
+                                       scene.lights[li].py,
+                                       scene.lights[li].pz);
+                    float3 lc = float3(scene.lights[li].color_r,
+                                       scene.lights[li].color_g,
+                                       scene.lights[li].color_b);
+                    float spec_mult = scene.lights[li].specular;
+
+                    // Direction from ghost exit point to light
+                    float3 to_light = normalize(lp - ghost_origin);
+                    float cos_angle = dot(ghost_dir, to_light);
+
+                    // Accept if ghost ray points roughly toward the light
+                    // Use a moderate cone for the "virtual light source" size
+                    if (cos_angle > 0.95) {
+                        float light_dist = length(lp - ghost_origin);
+                        float atten = 1.0 / (1.0 + light_dist * 0.01);
+                        // Smooth falloff within the acceptance cone
+                        float t = (cos_angle - 0.95) / 0.05;
+                        float intensity = t * t * spec_mult * atten;
+                        ghost_contrib += intensity * lc;
+                        debug_glint_hits += 1.0;
+                    }
+                }
+
+                // Also check scene hits for specular glints (point source reflections)
                 float nearest_dist = 1e30;
-                int hit_type = -1;  // 0=sphere, 1=plane
+                int hit_type = -1;
                 int hit_idx = -1;
                 float3 hit_point;
 
                 for (int si = 0; si < scene.num_spheres; si++) {
+                    if (scene.spheres[si].is_lens > 0.5) continue;
                     float3 sc = float3(scene.spheres[si].cx,
                                        scene.spheres[si].cy,
                                        scene.spheres[si].cz);
@@ -1161,82 +1194,45 @@ kernel void ghost_kernel(
                         }
                     }
                 }
-                for (int pi = 0; pi < scene.num_planes; pi++) {
-                    float3 isect;
-                    if (ray_plane_intersection(scene.planes[pi], ghost_origin, ghost_dir, isect)) {
-                        float d = distance(isect, ghost_origin);
-                        if (d > 0.001 && d < nearest_dist) {
-                            nearest_dist = d;
-                            hit_point = isect;
-                            hit_type = 1;
-                            hit_idx = pi;
-                        }
-                    }
-                }
 
-                if (hit_type >= 0) {
+                if (hit_type == 0) {
                     debug_hits += 1.0;
-                    constant GPUSurface &surf = (hit_type == 0)
-                        ? scene.spheres[hit_idx] : scene.planes[hit_idx];
+                    constant GPUSurface &surf = scene.spheres[hit_idx];
+                    float3 center = float3(surf.cx, surf.cy, surf.cz);
+                    float3 normal = normalize(hit_point - center);
 
-                    float3 normal;
-                    if (hit_type == 0) {
-                        float3 center = float3(surf.cx, surf.cy, surf.cz);
-                        normal = normalize(hit_point - center);
-                    } else {
-                        normal = normalize(float3(surf.cx, surf.cy, surf.cz));
-                    }
-
-                    float3 surf_color = float3(surf.color_r, surf.color_g, surf.color_b);
-                    float3 ghost_contrib = float3(0);
-
-                    // Emissive contribution (full weight for ghost streaks)
+                    // Emissive
                     if (surf.emission > 0) {
                         debug_emissive_hits += 1.0;
-                        ghost_contrib += surf_color * surf.emission;
+                        ghost_contrib += float3(surf.color_r, surf.color_g, surf.color_b) * surf.emission;
                     }
 
-                    // Ghost specular: use ghost ray view direction (not canonical camera view)
-                    // so the anamorphic optical distortion shapes the specular response.
-                    // No diffuse — ghosts should only carry bright highlights, not broad illumination.
-                    if (surf.is_lens < 0.5) {
-                        float3 ghost_view = normalize(ghost_dir);
-                        float3 refl_view = ghost_view - 2.0 * dot(ghost_view, normal) * normal;
-
-                        for (int li = 0; li < scene.num_lights; li++) {
-                            float3 lp = float3(scene.lights[li].px,
-                                               scene.lights[li].py,
-                                               scene.lights[li].pz);
-                            float3 lc = float3(scene.lights[li].color_r,
-                                               scene.lights[li].color_g,
-                                               scene.lights[li].color_b);
-
-                            float3 incidence = normalize(lp - hit_point);
+                    // Specular reflection of light sources at hit point
+                    float3 refl = ghost_dir - 2.0 * dot(ghost_dir, normal) * normal;
+                    for (int li = 0; li < scene.num_lights; li++) {
+                        float3 lp = float3(scene.lights[li].px,
+                                           scene.lights[li].py,
+                                           scene.lights[li].pz);
+                        float3 lc = float3(scene.lights[li].color_r,
+                                           scene.lights[li].color_g,
+                                           scene.lights[li].color_b);
+                        float spec_mult = scene.lights[li].specular;
+                        float3 to_light = normalize(lp - hit_point);
+                        float refl_cos = dot(refl, to_light);
+                        if (refl_cos > 0 && spec_mult > 0) {
                             float light_dist = length(lp - hit_point);
                             float atten = 1.0 / (1.0 + light_dist * 0.0001);
-
-                            // Specular contribution — use wider cone for ghost evaluation
-                            // Ghost rays sample the scene sparsely so we need a wider
-                            // angular acceptance to collect highlight energy
-                            float refl_cos = dot(refl_view, incidence);
-                            float spec_mult = scene.lights[li].specular;
-                            float diff_mult = scene.lights[li].diffuse_mult;
-                            if (refl_cos > 0) {
-                                // Wide specular lobe for ghost (Blinn-Phong-like with moderate exponent)
-                                float ghost_phong = min(surf.phong, 50.0f);
-                                float spec_val = pow(refl_cos, ghost_phong) * spec_mult;
-                                ghost_contrib += spec_val * lc * atten;
-                                if (spec_val > 0.01) debug_glint_hits += 1.0;
-                            }
+                            float ghost_phong = min(surf.phong, 80.0f);
+                            ghost_contrib += pow(refl_cos, ghost_phong) * spec_mult * lc * atten;
                         }
                     }
-
-                    ghost_contrib *= gw;
-                    ghost_contrib *= wavelength_to_rgb(wavelength, spec_norm);
-                    ghost_R += ghost_contrib.r;
-                    ghost_G += ghost_contrib.g;
-                    ghost_B += ghost_contrib.b;
                 }
+
+                ghost_contrib *= gw;
+                ghost_contrib *= wavelength_to_rgb(wavelength, spec_norm);
+                ghost_R += ghost_contrib.r;
+                ghost_G += ghost_contrib.g;
+                ghost_B += ghost_contrib.b;
             }
         }
     }
@@ -1244,7 +1240,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 10.0;
+    float ghost_boost = 0.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
@@ -1255,4 +1251,214 @@ kernel void ghost_kernel(
     output[gidx + 0] += ghost_R * ginv * ghost_boost;
     output[gidx + 1] += ghost_G * ginv * ghost_boost;
     output[gidx + 2] += ghost_B * ginv * ghost_boost;
+}
+
+// --- Source-driven flare kernel ---
+// Traces rays FROM bright light sources THROUGH the lens system TO the sensor.
+// The anamorphic cylinder naturally creates horizontal line-spread because it
+// focuses in one meridian and not the other.
+// Each thread traces one source ray sample.
+
+#define FLARE_MAX_BOUNCES 32
+
+kernel void flare_kernel(
+    constant GPUScene &scene [[buffer(0)]],
+    device atomic_float *flare_buf [[buffer(1)]],
+    uint tid [[thread_position_in_grid]]
+) {
+    int width = scene.width;
+    int height = scene.height;
+    if (scene.camera.num_lenses <= 0) return;
+
+    int total_lights = scene.num_lights;
+    int samples_per_light = 262144;  // 256K samples per light for dense flare coverage
+    int total_samples = total_lights * samples_per_light;
+    if ((int)tid >= total_samples) return;
+
+    int light_idx = tid / samples_per_light;
+    int sample_idx = tid % samples_per_light;
+
+    float3 light_pos = float3(scene.lights[light_idx].px,
+                               scene.lights[light_idx].py,
+                               scene.lights[light_idx].pz);
+    float3 light_color = float3(scene.lights[light_idx].color_r,
+                                 scene.lights[light_idx].color_g,
+                                 scene.lights[light_idx].color_b);
+    float spec_mult = scene.lights[light_idx].specular;
+
+    // Only process lights with specular component (these drive flares)
+    if (spec_mult < 1.0) return;
+
+    RNG rng(scene.frame_seed ^ tid * 2654435761u ^ uint(light_idx) * 7919u);
+
+    float3 spec_norm = float3(scene.spec_norm_r, scene.spec_norm_g, scene.spec_norm_b);
+
+    // Wavelength sampling
+    float wavelength = 380.0 + 400.0 * fract(float(sample_idx) * 0.6180339887 + rng.uniform());
+
+    // Sample a point on the front lens element (entrance pupil)
+    constant GPULensElement &front = scene.camera.lenses[0];
+    float lens_radius = front.radius;
+    float angle = 2.0 * M_PI_F * rng.uniform();
+    float rad = lens_radius * sqrt(rng.uniform());
+    float3 lens_point = float3(rad * cos(angle), rad * sin(angle), front.z);
+
+    // Direction from light to lens point
+    float3 dir = normalize(lens_point - light_pos);
+    float3 pos = lens_point;
+
+    // Weight: light enters lens pupil, energy proportional to solid angle
+    // Each ray represents a fraction of the pupil area
+    // The Monte Carlo estimator: integral = (1/N) * sum(f(x_i) / p(x_i))
+    // p(x_i) = 1/(pi*R^2) for uniform disk sampling
+    // f(x_i) = spec_mult * cos(theta) / dist^2  (irradiance at lens point)
+    // So weight = f / p / N = spec_mult * cos * pi * R^2 / (dist^2 * N)
+    float light_dist = length(lens_point - light_pos);
+    float3 to_lens = normalize(lens_point - light_pos);
+    float cos_angle = max(abs(to_lens.z), 0.1f);
+    // Flare boost: real flares are visible because of high source brightness
+    // and sensor integration time. Scale up to make visible in our render.
+    float flare_boost = 50000.0;
+    float weight = spec_mult * cos_angle * M_PI_F * lens_radius * lens_radius
+                   * flare_boost / (light_dist * light_dist * float(samples_per_light));
+
+    float current_ri = 1.0;  // start in air (light is outside lens)
+
+    float z_front = scene.camera.lenses[0].z;
+    float z_back = scene.camera.lenses[scene.camera.num_lenses - 1].z;
+    float z_margin = abs(z_front - z_back) + 0.5;
+    float z_max = max(z_front, z_back) + z_margin;
+    float z_min = min(z_front, z_back) - z_margin;
+
+    // Must have at least one reflection for this to be a flare ray
+    int reflections = 0;
+
+    for (int bounce = 0; bounce < FLARE_MAX_BOUNCES; bounce++) {
+        if (weight < 1e-8) break;
+
+        float nearest_t = 1e30;
+        float3 nearest_isect;
+        float3 nearest_normal;
+        int nearest_elem = -1;
+        float nearest_ri = 1.0;
+
+        for (int e = 0; e < scene.camera.num_lenses; e++) {
+            constant GPULensElement &elem = scene.camera.lenses[e];
+            float R_sq = elem.radius * elem.radius;
+            float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
+            bool is_cyl = (elem.anamorphic > 0.5);
+            float cyl_ang = elem.anamorphic;
+
+            float abs_r1 = abs(elem.r1);
+            float fc_z = elem.front_center_z;
+            float t0, t1;
+            if (is_cyl) ray_cylinder_t(fc_z, abs_r1, cyl_ang, pos, dir, t0, t1);
+            else ray_sphere_t(float3(0, 0, fc_z), abs_r1, pos, dir, t0, t1);
+            for (int h = 0; h < 2; h++) {
+                float t = (h == 0) ? t0 : t1;
+                if (t <= LENS_EPS || t >= nearest_t) continue;
+                float3 isect = pos + t * dir;
+                if (isect.z < z_min || isect.z > z_max) continue;
+                if (isect.x * isect.x + isect.y * isect.y > R_sq) continue;
+                float3 normal = is_cyl ? cylinder_normal(isect, fc_z, cyl_ang)
+                                       : normalize(isect - float3(0, 0, fc_z));
+                nearest_t = t; nearest_isect = isect; nearest_normal = normal;
+                nearest_elem = e; nearest_ri = ri;
+            }
+
+            float abs_r2 = abs(elem.r2);
+            float bc_z = elem.back_center_z;
+            if (is_cyl) ray_cylinder_t(bc_z, abs_r2, cyl_ang, pos, dir, t0, t1);
+            else ray_sphere_t(float3(0, 0, bc_z), abs_r2, pos, dir, t0, t1);
+            for (int h = 0; h < 2; h++) {
+                float t = (h == 0) ? t0 : t1;
+                if (t <= LENS_EPS || t >= nearest_t) continue;
+                float3 isect = pos + t * dir;
+                if (isect.z < z_min || isect.z > z_max) continue;
+                if (isect.x * isect.x + isect.y * isect.y > R_sq) continue;
+                float3 normal = is_cyl ? cylinder_normal(isect, bc_z, cyl_ang)
+                                       : normalize(isect - float3(0, 0, bc_z));
+                nearest_t = t; nearest_isect = isect; nearest_normal = normal;
+                nearest_elem = e; nearest_ri = ri;
+            }
+        }
+
+        // Aperture check
+        if (scene.camera.aperture_radius > 0 && abs(dir.z) > 0.0001) {
+            float t_ap = (scene.camera.aperture_z - pos.z) / dir.z;
+            if (t_ap > LENS_EPS && (nearest_elem < 0 || t_ap < nearest_t)) {
+                float3 ap_hit = pos + t_ap * dir;
+                if (ap_hit.x * ap_hit.x + ap_hit.y * ap_hit.y >
+                    scene.camera.aperture_radius * scene.camera.aperture_radius)
+                    break;  // blocked by aperture
+            }
+        }
+
+        if (nearest_elem < 0) {
+            // Ray exits lens system
+            // If heading toward sensor (dir.z > 0) and has reflected at least once = flare
+            if (dir.z > 0 && reflections > 0) {
+                // Intersect with sensor plane at z = cam_z
+                float t_sensor = (scene.camera.cam_z - pos.z) / dir.z;
+                if (t_sensor > 0) {
+                    float3 sensor_hit = pos + t_sensor * dir;
+
+                    // Map sensor hit to pixel coordinates
+                    float aspect = float(width) / float(height);
+                    float px = 0.5 - sensor_hit.x / (2.0 * scene.camera.cam_d * aspect);
+                    float py = 0.5 - sensor_hit.y / (2.0 * scene.camera.cam_d);
+
+                    int ix = int(px * float(width));
+                    int iy = int(py * float(height));
+
+                    if (ix >= 0 && ix < width && iy >= 0 && iy < height) {
+                        float3 spectral = wavelength_to_rgb(wavelength, spec_norm);
+                        float3 contribution = light_color * weight * spectral;
+
+                        int pidx = (iy * width + ix) * 3;
+                        atomic_fetch_add_explicit(&flare_buf[pidx + 0], contribution.r, memory_order_relaxed);
+                        atomic_fetch_add_explicit(&flare_buf[pidx + 1], contribution.g, memory_order_relaxed);
+                        atomic_fetch_add_explicit(&flare_buf[pidx + 2], contribution.b, memory_order_relaxed);
+                    }
+                }
+            }
+            break;
+        }
+
+        // Fresnel at surface
+        bool entering = (current_ri < 1.01);
+        float n1 = current_ri;
+        float n2 = entering ? nearest_ri : 1.0;
+        float cos_i = abs(dot(dir, nearest_normal));
+        float fresnel_r = fresnel_schlick(cos_i, n1, n2);
+        float surf_refl = scene.camera.lenses[nearest_elem].reflectance;
+        fresnel_r = fresnel_r + surf_refl * (1.0 - fresnel_r);
+
+        float3 n = (dot(dir, nearest_normal) < 0) ? nearest_normal : -nearest_normal;
+
+        // Probabilistically reflect or refract
+        if (rng.uniform() < fresnel_r) {
+            // Reflect
+            dir = normalize(dir - 2.0 * dot(dir, n) * n);
+            pos = nearest_isect;
+            reflections++;
+        } else {
+            // Refract
+            float eta = n1 / n2;
+            float3 refracted = refract(dir, n, eta);
+            if (length(refracted) < 0.001) {
+                // Total internal reflection
+                dir = normalize(dir - 2.0 * dot(dir, n) * n);
+                pos = nearest_isect;
+                reflections++;
+            } else {
+                dir = refracted;
+                pos = nearest_isect;
+                current_ri = n2;
+            }
+        }
+
+        // Weight doesn't need Fresnel weighting since we're sampling probabilistically
+        // (Russian roulette: reflect with probability fresnel_r, refract with 1-fresnel_r)
+    }
 }

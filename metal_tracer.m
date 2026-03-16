@@ -82,6 +82,7 @@ static id<MTLCommandQueue>        mtl_queue;
 static id<MTLComputePipelineState> mtl_pipeline;
 static id<MTLComputePipelineState> mtl_ghost_pipeline;
 static id<MTLComputePipelineState> mtl_detect_bright_pipeline;
+static id<MTLComputePipelineState> mtl_flare_pipeline;
 static int gpu_ready = 0;
 
 int gpu_init(void) {
@@ -152,6 +153,15 @@ int gpu_init(void) {
             mtl_detect_bright_pipeline = [mtl_device newComputePipelineStateWithFunction:detect_fn error:&error];
             if (!mtl_detect_bright_pipeline) {
                 fprintf(stderr, "Metal: detect_bright pipeline error: %s\n",
+                        [[error localizedDescription] UTF8String]);
+            }
+        }
+
+        id<MTLFunction> flare_fn = [library newFunctionWithName:@"flare_kernel"];
+        if (flare_fn) {
+            mtl_flare_pipeline = [mtl_device newComputePipelineStateWithFunction:flare_fn error:&error];
+            if (!mtl_flare_pipeline) {
+                fprintf(stderr, "Metal: flare pipeline error: %s\n",
                         [[error localizedDescription] UTF8String]);
             }
         }
@@ -504,6 +514,50 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             }
             fprintf(stderr, "  ghost debug: emissive_hits=%.0f max_gw=%.6f contrib=%.4f (max=%.4f)\n",
                     total_emissive, max_gw, total_contrib, max_contrib);
+        }
+
+        // Dispatch flare kernel (source-driven anamorphic streaks)
+        if (ghost_rays && mtl_flare_pipeline) {
+            size_t flare_size = sizeof(float) * width * height * 3;
+            id<MTLBuffer> flare_buf = [mtl_device newBufferWithLength:flare_size
+                                                              options:MTLResourceStorageModeShared];
+            memset([flare_buf contents], 0, flare_size);
+
+            int samples_per_light = 262144;  // must match tracer.metal
+            int total_flare_threads = gpu_scene.num_lights * samples_per_light;
+
+            NSUInteger fw = [mtl_flare_pipeline threadExecutionWidth];
+            MTLSize flare_grid = MTLSizeMake(total_flare_threads, 1, 1);
+            MTLSize flare_group = MTLSizeMake(fw, 1, 1);
+
+            id<MTLCommandBuffer> flare_cmd = [mtl_queue commandBuffer];
+            id<MTLComputeCommandEncoder> flare_enc = [flare_cmd computeCommandEncoder];
+            [flare_enc setComputePipelineState:mtl_flare_pipeline];
+            [flare_enc setBuffer:scene_buf offset:0 atIndex:0];
+            [flare_enc setBuffer:flare_buf offset:0 atIndex:1];
+            [flare_enc dispatchThreads:flare_grid threadsPerThreadgroup:flare_group];
+            [flare_enc endEncoding];
+
+            struct timeval fs, fe;
+            gettimeofday(&fs, NULL);
+            [flare_cmd commit];
+            [flare_cmd waitUntilCompleted];
+            gettimeofday(&fe, NULL);
+            float flare_ms = ((fe.tv_sec - fs.tv_sec) * 1000.0f +
+                             (fe.tv_usec - fs.tv_usec) / 1000.0f);
+
+            // Accumulate flare into output
+            float *fb = (float *)[flare_buf contents];
+            float *out = (float *)[output_buf contents];
+            float max_flare = 0;
+            int flare_pixels = 0;
+            for (int i = 0; i < width * height * 3; i++) {
+                if (fb[i] > 0) flare_pixels++;
+                if (fb[i] > max_flare) max_flare = fb[i];
+                out[i] += fb[i];
+            }
+            fprintf(stderr, "  flare pass: %.1fms  flare_pixels=%d  max_flare=%.4f\n",
+                    flare_ms, flare_pixels / 3, max_flare);
         }
 
         // Read back and convert
