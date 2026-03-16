@@ -1256,10 +1256,11 @@ kernel void ghost_kernel(
     output[gidx + 2] += ghost_B * ginv * ghost_boost;
 }
 
-// --- Source-driven streak kernel (forward cylinder ghost) ---
-// Traces rays from glint positions FORWARD through the lens system.
-// At the cylinder surfaces, forces reflections to create anisotropic ghost paths.
-// The cylinder focuses reflected rays in Y but not X → horizontal streak.
+// --- Source-driven streak kernel (probabilistic flare from glints) ---
+// Traces rays from computed glint positions through the lens system using
+// probabilistic Fresnel (reflect/refract at each surface). Accumulates
+// any ray that reaches the sensor after at least 1 reflection on a
+// cylindrical surface. The cylinder creates horizontal spread.
 
 #define FLARE_MAX_BOUNCES 32
 
@@ -1273,7 +1274,7 @@ kernel void flare_kernel(
     if (scene.camera.num_lenses <= 0) return;
 
     int total_lights = scene.num_lights;
-    int samples_per_light = 67108864;  // 64M samples per light
+    int samples_per_light = 67108864;
     int total_samples = total_lights * samples_per_light;
     if ((int)tid >= total_samples) return;
 
@@ -1287,7 +1288,6 @@ kernel void flare_kernel(
                                  scene.lights[light_idx].color_g,
                                  scene.lights[light_idx].color_b);
     float spec_mult = scene.lights[light_idx].specular;
-
     if (spec_mult < 1.0) return;
 
     RNG rng(scene.frame_seed ^ tid * 2654435761u ^ uint(light_idx) * 7919u);
@@ -1315,26 +1315,7 @@ kernel void flare_kernel(
         glint_pos = best_center + best_radius * h;
     }
 
-    // Find the anamorphic cylinder element
-    int cyl_elem = -1;
-    for (int e = 0; e < scene.camera.num_lenses; e++) {
-        if (scene.camera.lenses[e].anamorphic > 0.5) { cyl_elem = e; break; }
-    }
-    if (cyl_elem < 0) return;
-
-    // Ghost pair: bounce between cylinder front and back surfaces only
-    // This creates pure anisotropic ghost paths for horizontal streaks
-    int pair_select = sample_idx % 2;
-    int reflect_surf_1, reflect_surf_2;
-    if (pair_select == 0) {
-        reflect_surf_1 = cyl_elem * 2 + 1;  // back of cylinder (hit first going forward)
-        reflect_surf_2 = cyl_elem * 2;        // front of cylinder (hit on return)
-    } else {
-        reflect_surf_1 = cyl_elem * 2;        // front of cylinder
-        reflect_surf_2 = cyl_elem * 2 + 1;    // back of cylinder
-    }
-
-    // Sample a point on the BACK (scene-side) lens
+    // Sample entry point on back lens element (scene side)
     int back_idx = scene.camera.num_lenses - 1;
     constant GPULensElement &back = scene.camera.lenses[back_idx];
     float lens_radius = back.radius;
@@ -1348,12 +1329,13 @@ kernel void flare_kernel(
     // Weight
     float glint_dist = length(lens_point - glint_pos);
     float cos_angle = max(abs(dir.z), 0.1f);
-    float streak_boost = 10000.0;
+    float streak_boost = 2000.0;
     float weight = spec_mult * cos_angle * M_PI_F * lens_radius * lens_radius
                    * streak_boost / (glint_dist * glint_dist * float(samples_per_light));
 
     float current_ri = 1.0;
-    int reflections_done = 0;
+    int reflections = 0;
+    bool reflected_on_cylinder = false;
 
     float z_front = scene.camera.lenses[0].z;
     float z_back = scene.camera.lenses[scene.camera.num_lenses - 1].z;
@@ -1368,7 +1350,6 @@ kernel void flare_kernel(
         float3 nearest_isect;
         float3 nearest_normal;
         int nearest_elem = -1;
-        int nearest_surf_id = -1;
         float nearest_ri = 1.0;
 
         for (int e = 0; e < scene.camera.num_lenses; e++) {
@@ -1383,8 +1364,8 @@ kernel void flare_kernel(
             float t0, t1;
             if (is_cyl) ray_cylinder_t(fc_z, abs_r1, cyl_ang, pos, dir, t0, t1);
             else ray_sphere_t(float3(0, 0, fc_z), abs_r1, pos, dir, t0, t1);
-            for (int h = 0; h < 2; h++) {
-                float t = (h == 0) ? t0 : t1;
+            for (int hh = 0; hh < 2; hh++) {
+                float t = (hh == 0) ? t0 : t1;
                 if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;
@@ -1392,15 +1373,15 @@ kernel void flare_kernel(
                 float3 normal = is_cyl ? cylinder_normal(isect, fc_z, cyl_ang)
                                        : normalize(isect - float3(0, 0, fc_z));
                 nearest_t = t; nearest_isect = isect; nearest_normal = normal;
-                nearest_elem = e; nearest_ri = ri; nearest_surf_id = e * 2;
+                nearest_elem = e; nearest_ri = ri;
             }
 
             float abs_r2 = abs(elem.r2);
             float bc_z = elem.back_center_z;
             if (is_cyl) ray_cylinder_t(bc_z, abs_r2, cyl_ang, pos, dir, t0, t1);
             else ray_sphere_t(float3(0, 0, bc_z), abs_r2, pos, dir, t0, t1);
-            for (int h = 0; h < 2; h++) {
-                float t = (h == 0) ? t0 : t1;
+            for (int hh = 0; hh < 2; hh++) {
+                float t = (hh == 0) ? t0 : t1;
                 if (t <= LENS_EPS || t >= nearest_t) continue;
                 float3 isect = pos + t * dir;
                 if (isect.z < z_min || isect.z > z_max) continue;
@@ -1408,15 +1389,13 @@ kernel void flare_kernel(
                 float3 normal = is_cyl ? cylinder_normal(isect, bc_z, cyl_ang)
                                        : normalize(isect - float3(0, 0, bc_z));
                 nearest_t = t; nearest_isect = isect; nearest_normal = normal;
-                nearest_elem = e; nearest_ri = ri; nearest_surf_id = e * 2 + 1;
+                nearest_elem = e; nearest_ri = ri;
             }
         }
 
-        // No aperture clipping for flare path — allow full extent of streaks
-
         if (nearest_elem < 0) {
-            // Ray exits lens — if toward sensor and did 2 reflections, accumulate
-            if (dir.z > 0 && reflections_done == 2) {
+            // Ray exits lens — accumulate if reflected on cylinder at least once
+            if (dir.z > 0 && reflected_on_cylinder) {
                 float t_sensor = (scene.camera.cam_z - pos.z) / dir.z;
                 if (t_sensor > 0) {
                     float3 sensor_hit = pos + t_sensor * dir;
@@ -1454,7 +1433,7 @@ kernel void flare_kernel(
             break;
         }
 
-        // Fresnel
+        // Probabilistic Fresnel at surface
         bool entering = (current_ri < 1.01);
         float n1 = current_ri;
         float n2 = entering ? nearest_ri : 1.0;
@@ -1465,28 +1444,28 @@ kernel void flare_kernel(
 
         float3 n = (dot(dir, nearest_normal) < 0) ? nearest_normal : -nearest_normal;
 
-        // Force reflection at target surfaces
-        bool force_reflect = false;
-        if (reflections_done == 0 && nearest_surf_id == reflect_surf_1)
-            force_reflect = true;
-        else if (reflections_done == 1 && nearest_surf_id == reflect_surf_2)
-            force_reflect = true;
-
-        if (force_reflect) {
-            weight *= fresnel_r;
-            if (weight < 1e-10) break;
+        if (rng.uniform() < fresnel_r) {
+            // Reflect
             dir = normalize(dir - 2.0 * dot(dir, n) * n);
             pos = nearest_isect;
-            reflections_done++;
+            reflections++;
+            if (scene.camera.lenses[nearest_elem].anamorphic > 0.5)
+                reflected_on_cylinder = true;
         } else {
-            weight *= (1.0 - fresnel_r);
-            if (weight < 1e-10) break;
+            // Refract
             float eta = n1 / n2;
             float3 refracted = refract(dir, n, eta);
-            if (length(refracted) < 0.001) break;
-            dir = refracted;
-            pos = nearest_isect;
-            current_ri = n2;
+            if (length(refracted) < 0.001) {
+                dir = normalize(dir - 2.0 * dot(dir, n) * n);
+                pos = nearest_isect;
+                reflections++;
+                if (scene.camera.lenses[nearest_elem].anamorphic > 0.5)
+                    reflected_on_cylinder = true;
+            } else {
+                dir = refracted;
+                pos = nearest_isect;
+                current_ri = n2;
+            }
         }
     }
 }
