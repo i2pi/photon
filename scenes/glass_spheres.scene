@@ -1,7 +1,7 @@
 # Glass spheres scene — pink sphere with nested glass shells
 # 3-element lens: crown biconvex, anamorphic cylinder, flint meniscus
 
-render width=512 height=512 min_samples=512 max_samples=4000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=0 exposure=0.35 contrast=1.2
+render width=512 height=512 min_samples=512 max_samples=4000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=0 exposure=0.25 contrast=1.5
 
 camera z=0.5 d=0.50
 aperture z=-0.02 radius=0.015
@@ -16,7 +16,7 @@ lens z=-0.042 r1=1.60  r2=1.60  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflect
 lens z=-0.054 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.015 reflectance=0.04
 
 # Center sphere — dark metallic core
-sphere pos=0.0,0.0,-3.05 radius=0.7 color=0.45,0.50,0.55 roughness=0.02 reflectance=0.30 transparency=0.0 phong=500
+sphere pos=0.0,0.0,-3.05 radius=0.65 color=0.35,0.40,0.45 roughness=0.01 reflectance=0.35 transparency=0.0 phong=800
 
 # Glass shells — nested concentric with increasing transparency outward
 sphere pos=0.0,0.0,-3.05 radius=0.95 color=0.65,0.75,0.80 transparency=0.75 reflectance=0.20 cauchy_a=1.52 cauchy_b=0.01 phong=500
@@ -33,6 +33,6 @@ light pos=0,8,5 intensity=4.0
 light pos=8,-3,3 intensity=2.5
 light pos=-8,-3,3 intensity=2.5
 # Specular-only lights for bright glints that drive ghost streaks
-light pos=5,-4,3 intensity=2.0 specular=25.0 diffuse=0.0
-light pos=-4,5,3 intensity=1.5 specular=20.0 diffuse=0.0
+light pos=5,-4,3 intensity=3.0 specular=50.0 diffuse=0.0
+light pos=-4,5,3 intensity=2.5 specular=40.0 diffuse=0.0
 
