@@ -583,8 +583,7 @@ float ray_ghost_through_lens(float3 ray_origin, float3 ray_dir,
         for (int e = 0; e < cam.num_lenses; e++) {
             constant GPULensElement &elem = cam.lenses[e];
             float R_sq = elem.radius * elem.radius;
-            float ghost_dispersion_boost = 5.0;
-            float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b * ghost_dispersion_boost, wavelength);
+            float ri = cauchy_ri(elem.cauchy_a, elem.cauchy_b, wavelength);
             bool is_cyl = (elem.anamorphic > 0.5);
             float cyl_ang = elem.anamorphic;
 
@@ -1091,11 +1090,22 @@ kernel void ghost_kernel(
     );
 
     float3 spec_norm = float3(scene.spec_norm_r, scene.spec_norm_g, scene.spec_norm_b);
-    float3 ghost_lens_center = float3(0, 0, scene.camera.lenses[0].z);
-    float3 ghost_ray_dir = normalize(ghost_lens_center - sensor_origin);
 
+    // Compute effective pupil radius (same as trace_kernel DOF sampling)
+    float dof_radius = scene.camera.lenses[0].radius;
+    for (int le = 1; le < scene.camera.num_lenses; le++)
+        dof_radius = min(dof_radius, scene.camera.lenses[le].radius);
+    if (scene.camera.aperture_radius > 0)
+        dof_radius = min(dof_radius, scene.camera.aperture_radius);
+
+    // Per-pixel RNG for Cranley-Patterson rotation offsets
     RNG pixel_rng(scene.frame_seed ^ pixel_idx * 1973u ^ uint(x) * 9277u ^ uint(y) * 6581u);
     float pixel_rand_w = pixel_rng.uniform();
+    float pixel_rand_a = pixel_rng.uniform();
+    float pixel_rand_r = pixel_rng.uniform();
+
+    // Sample RNG (separate from pixel_rng to vary across samples)
+    RNG rng(scene.frame_seed ^ pixel_idx * 2971u ^ uint(x) * 7919u ^ uint(y) * 4391u ^ 0x60570u);
 
     float ghost_R = 0, ghost_G = 0, ghost_B = 0;
     float debug_exits = 0;
@@ -1104,8 +1114,17 @@ kernel void ghost_kernel(
     float debug_glint_hits = 0;
     float debug_max_gw = 0;
 
+    float front_z = scene.camera.lenses[0].z;
+
     for (int i = 0; i < GHOST_SAMPLES; i++) {
         float wavelength = 380.0 + 400.0 * fract(float(i) * 0.6180339887 + pixel_rand_w);
+
+        // Sample entrance pupil point (same stratification as trace_kernel)
+        float angle = 2.0 * M_PI_F * fract(float(i) * 0.7548776662 + pixel_rand_a);
+        float rad = dof_radius * sqrt(fract(float(i) * 0.3247179572 + pixel_rand_r));
+        float3 lens_point = float3(rad * cos(angle), rad * sin(angle), front_z);
+
+        float3 ghost_ray_dir = normalize(lens_point - sensor_origin);
 
         for (int p = 0; p < scene.camera.num_ghost_pairs; p++) {
             int s1 = scene.camera.ghost_pairs[p * 2];
@@ -1120,95 +1139,127 @@ kernel void ghost_kernel(
             if (gw > 1e-7) {
                 debug_exits += 1.0;
                 debug_max_gw = max(debug_max_gw, gw);
-                // Find nearest sphere intersection
-                float nearest_t = 1e30;
-                int nearest_si = -1;
+
+                // Find nearest scene intersection (spheres + planes)
+                float nearest_dist = 1e30;
+                int hit_type = -1;  // 0=sphere, 1=plane
+                int hit_idx = -1;
+                float3 hit_point;
+
                 for (int si = 0; si < scene.num_spheres; si++) {
                     float3 sc = float3(scene.spheres[si].cx,
                                        scene.spheres[si].cy,
                                        scene.spheres[si].cz);
                     float sr = scene.spheres[si].radius;
-                    float3 oc = ghost_origin - sc;
-                    float gb = dot(oc, ghost_dir);
-                    float gc_disc = gb * gb - (dot(oc, oc) - sr * sr);
-                    if (gc_disc <= 0) continue;
-                    float gt = -gb - sqrt(gc_disc);
-                    if (gt > 0.001 && gt < nearest_t) {
-                        nearest_t = gt;
-                        nearest_si = si;
+                    float3 isect;
+                    if (ray_sphere_intersection(sc, sr, ghost_origin, ghost_dir, isect)) {
+                        float d = distance(isect, ghost_origin);
+                        if (d > 0.001 && d < nearest_dist) {
+                            nearest_dist = d;
+                            hit_point = isect;
+                            hit_type = 0;
+                            hit_idx = si;
+                        }
                     }
                 }
-                if (nearest_si >= 0) {
+                for (int pi = 0; pi < scene.num_planes; pi++) {
+                    float3 isect;
+                    if (ray_plane_intersection(scene.planes[pi], ghost_origin, ghost_dir, isect)) {
+                        float d = distance(isect, ghost_origin);
+                        if (d > 0.001 && d < nearest_dist) {
+                            nearest_dist = d;
+                            hit_point = isect;
+                            hit_type = 1;
+                            hit_idx = pi;
+                        }
+                    }
+                }
+
+                if (hit_type >= 0) {
                     debug_hits += 1.0;
-                    int si = nearest_si;
-                    float gt = nearest_t;
-                    float3 sc = float3(scene.spheres[si].cx,
-                                       scene.spheres[si].cy,
-                                       scene.spheres[si].cz);
+                    constant GPUSurface &surf = (hit_type == 0)
+                        ? scene.spheres[hit_idx] : scene.planes[hit_idx];
 
-                    if (scene.spheres[si].emission >= 1.0) {
+                    float3 normal;
+                    if (hit_type == 0) {
+                        float3 center = float3(surf.cx, surf.cy, surf.cz);
+                        normal = normalize(hit_point - center);
+                    } else {
+                        normal = normalize(float3(surf.cx, surf.cy, surf.cz));
+                    }
+
+                    float3 surf_color = float3(surf.color_r, surf.color_g, surf.color_b);
+                    float3 ghost_contrib = float3(0);
+
+                    // Emissive contribution
+                    if (surf.emission > 0) {
                         debug_emissive_hits += 1.0;
-                        // Direct hit on emissive sphere
-                        float3 gc = float3(scene.spheres[si].color_r,
-                                           scene.spheres[si].color_g,
-                                           scene.spheres[si].color_b);
-                        gc *= scene.spheres[si].emission * gw;
-                        gc *= wavelength_to_rgb(wavelength, spec_norm);
-                        ghost_R += gc.r;
-                        ghost_G += gc.g;
-                        ghost_B += gc.b;
-                    } else if (scene.spheres[si].is_lens < 0.5 && scene.spheres[si].phong > 1.0) {
-                        // Glass scene object: check specular from lights
-                        // using the ghost ray's actual incoming direction
-                        float3 hit_pt = ghost_origin + gt * ghost_dir;
-                        float3 hit_n = normalize(hit_pt - sc);
+                        ghost_contrib += surf_color * surf.emission;
+                    }
 
-                        // Reflect ghost ray direction off surface
-                        float3 refl_ghost = ghost_dir - 2.0 * dot(ghost_dir, hit_n) * hit_n;
-
-                        float n_ior = scene.spheres[si].cauchy_a;
-                        float f0 = ((n_ior - 1.0) / (n_ior + 1.0)) * ((n_ior - 1.0) / (n_ior + 1.0));
-
+                    // Direct lighting evaluation — same as trace_ray
+                    // Skip lens elements (is_lens flag)
+                    if (surf.is_lens < 0.5) {
                         for (int li = 0; li < scene.num_lights; li++) {
                             float3 lp = float3(scene.lights[li].px,
                                                scene.lights[li].py,
                                                scene.lights[li].pz);
-                            float3 to_light = normalize(lp - hit_pt);
-                            float refl_cos = dot(refl_ghost, to_light);
+                            float3 lc = float3(scene.lights[li].color_r,
+                                               scene.lights[li].color_g,
+                                               scene.lights[li].color_b);
 
-                            // Ghost image is aberrated — use wider cone than main render
-                            // The ghost path through multiple lens reflections introduces
-                            // significant angular spread, so the effective glint size is larger
-                            float ghost_phong = min(scene.spheres[si].phong, 200.0f);
-                            float glint_size = 1.0 / ghost_phong;
-                            if (refl_cos > (1.0 - glint_size)) {
-                                float t_val = (refl_cos - (1.0 - glint_size)) / glint_size;
-                                float cos_i = max(dot(hit_n, to_light), 0.0f);
-                                float fresnel = f0 + (1.0 - f0) * pow(1.0 - cos_i, 5.0);
-                                float spec_mult = scene.lights[li].specular;
-                                float light_dist = length(lp - hit_pt);
-                                float atten = 1.0 / (1.0 + light_dist * 0.0001);
+                            float3 incidence = lp - hit_point;
+                            float light_dist = length(incidence);
+                            incidence = normalize(incidence);
 
-                                float3 lc = float3(scene.lights[li].color_r,
-                                                   scene.lights[li].color_g,
-                                                   scene.lights[li].color_b);
-                                float3 gc = lc * atten * t_val * t_val * fresnel * spec_mult * gw;
-                                gc *= wavelength_to_rgb(wavelength, spec_norm);
-                                ghost_R += gc.r;
-                                ghost_G += gc.g;
-                                ghost_B += gc.b;
+                            float diffuse = max(dot(normal, incidence), 0.0f);
+
+                            // Specular: use canonical view direction
+                            float3 canonical_view = normalize(hit_point - float3(0, 0, scene.camera.cam_z));
+                            float3 refl_view = canonical_view - 2.0 * dot(canonical_view, normal) * normal;
+                            float3 to_light = incidence;
+                            float refl_cos = dot(refl_view, to_light);
+
+                            // Fresnel
+                            float n_ior = surf.cauchy_a;
+                            float f0 = ((n_ior - 1.0) / (n_ior + 1.0)) * ((n_ior - 1.0) / (n_ior + 1.0));
+                            float cos_i = max(dot(normal, to_light), 0.0f);
+                            float fresnel = f0 + (1.0 - f0) * pow(1.0 - cos_i, 5.0);
+
+                            float atten = 1.0 / (1.0 + light_dist * 0.0001);
+
+                            // Diffuse term
+                            float diff_term = (1.0 - surf.transparency) * diffuse * 0.9 * scene.lights[li].diffuse_mult;
+                            ghost_contrib += diff_term * surf_color * lc * atten;
+
+                            // Specular/glint term
+                            float spec_mult = scene.lights[li].specular;
+                            if (surf.phong > 1.0 && refl_cos > 0) {
+                                float glint_size = 1.0 / surf.phong;
+                                if (refl_cos > (1.0 - glint_size)) {
+                                    float t_val = (refl_cos - (1.0 - glint_size)) / glint_size;
+                                    float spec_term = t_val * t_val * fresnel * spec_mult;
+                                    ghost_contrib += spec_term * lc * atten;
+                                    debug_glint_hits += 1.0;
+                                }
                             }
                         }
                     }
+
+                    ghost_contrib *= gw;
+                    ghost_contrib *= wavelength_to_rgb(wavelength, spec_norm);
+                    ghost_R += ghost_contrib.r;
+                    ghost_G += ghost_contrib.g;
+                    ghost_B += ghost_contrib.b;
                 }
             }
         }
     }
 
-    // Debug: R=emissive_hits, G=max_gw, B=total ghost contribution
+    // Debug: R=emissive_hits+glint_hits, G=max_gw, B=total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
     int gidx = pixel_idx * 3;
-    ghost_buf[gidx + 0] = debug_emissive_hits;
+    ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
     ghost_buf[gidx + 1] = debug_max_gw;
     ghost_buf[gidx + 2] = ghost_R + ghost_G + ghost_B;
 
