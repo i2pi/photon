@@ -1175,7 +1175,7 @@ kernel void ghost_kernel(
 
         // Streak profile: tight perpendicular (Gaussian), wide along streak
         // The streak width along the axis scales with source brightness
-        float perp_sigma = 2.0;  // tight perpendicular falloff (pixels)
+        float perp_sigma = 1.0;  // tight perpendicular falloff (pixels)
         float along_scale = max(src_lum * 20.0, 200.0);  // streak length scales with brightness
         float perp_weight = exp(-0.5 * (perp_streak * perp_streak) / (perp_sigma * perp_sigma));
         float along_dist = abs(along_streak);
