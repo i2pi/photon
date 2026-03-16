@@ -1256,11 +1256,10 @@ kernel void ghost_kernel(
     output[gidx + 2] += ghost_B * ginv * ghost_boost;
 }
 
-// --- Source-driven flare kernel ---
-// Traces rays FROM bright light sources THROUGH the lens system TO the sensor.
-// The anamorphic cylinder naturally creates horizontal line-spread because it
-// focuses in one meridian and not the other.
-// Each thread traces one source ray sample.
+// --- Source-driven streak kernel (forward cylinder ghost) ---
+// Traces rays from glint positions FORWARD through the lens system.
+// At the cylinder surfaces, forces reflections to create anisotropic ghost paths.
+// The cylinder focuses reflected rays in Y but not X → horizontal streak.
 
 #define FLARE_MAX_BOUNCES 32
 
@@ -1274,7 +1273,7 @@ kernel void flare_kernel(
     if (scene.camera.num_lenses <= 0) return;
 
     int total_lights = scene.num_lights;
-    int samples_per_light = 67108864;  // 64M samples per light for smooth flare coverage
+    int samples_per_light = 67108864;  // 64M samples per light
     int total_samples = total_lights * samples_per_light;
     if ((int)tid >= total_samples) return;
 
@@ -1289,43 +1288,72 @@ kernel void flare_kernel(
                                  scene.lights[light_idx].color_b);
     float spec_mult = scene.lights[light_idx].specular;
 
-    // Only process lights with specular component (these drive flares)
     if (spec_mult < 1.0) return;
 
     RNG rng(scene.frame_seed ^ tid * 2654435761u ^ uint(light_idx) * 7919u);
-
     float3 spec_norm = float3(scene.spec_norm_r, scene.spec_norm_g, scene.spec_norm_b);
-
-    // Wavelength sampling
     float wavelength = 380.0 + 400.0 * fract(float(sample_idx) * 0.6180339887 + rng.uniform());
 
-    // Sample a point on the front lens element (entrance pupil)
-    constant GPULensElement &front = scene.camera.lenses[0];
-    float lens_radius = front.radius;
+    // Compute glint position on outermost glass sphere
+    float3 best_center = float3(0, 0, -3.0);
+    float best_radius = 1.5;
+    for (int si = 0; si < scene.num_spheres; si++) {
+        if (scene.spheres[si].phong > 100 && scene.spheres[si].transparency > 0.5) {
+            if (scene.spheres[si].radius > best_radius) {
+                best_center = float3(scene.spheres[si].cx, scene.spheres[si].cy, scene.spheres[si].cz);
+                best_radius = scene.spheres[si].radius;
+            }
+        }
+    }
+
+    float3 cam_pos = float3(0, 0, scene.camera.cam_z);
+    float3 glint_pos = best_center + best_radius * normalize(cam_pos - best_center);
+    for (int iter = 0; iter < 5; iter++) {
+        float3 v = normalize(cam_pos - glint_pos);
+        float3 l = normalize(light_pos - glint_pos);
+        float3 h = normalize(v + l);
+        glint_pos = best_center + best_radius * h;
+    }
+
+    // Find the anamorphic cylinder element
+    int cyl_elem = -1;
+    for (int e = 0; e < scene.camera.num_lenses; e++) {
+        if (scene.camera.lenses[e].anamorphic > 0.5) { cyl_elem = e; break; }
+    }
+    if (cyl_elem < 0) return;
+
+    // Ghost pair: bounce between cylinder front and back surfaces only
+    // This creates pure anisotropic ghost paths for horizontal streaks
+    int pair_select = sample_idx % 2;
+    int reflect_surf_1, reflect_surf_2;
+    if (pair_select == 0) {
+        reflect_surf_1 = cyl_elem * 2 + 1;  // back of cylinder (hit first going forward)
+        reflect_surf_2 = cyl_elem * 2;        // front of cylinder (hit on return)
+    } else {
+        reflect_surf_1 = cyl_elem * 2;        // front of cylinder
+        reflect_surf_2 = cyl_elem * 2 + 1;    // back of cylinder
+    }
+
+    // Sample a point on the BACK (scene-side) lens
+    int back_idx = scene.camera.num_lenses - 1;
+    constant GPULensElement &back = scene.camera.lenses[back_idx];
+    float lens_radius = back.radius;
     float angle = 2.0 * M_PI_F * rng.uniform();
     float rad = lens_radius * sqrt(rng.uniform());
-    float3 lens_point = float3(rad * cos(angle), rad * sin(angle), front.z);
+    float3 lens_point = float3(rad * cos(angle), rad * sin(angle), back.z);
 
-    // Direction from light to lens point
-    float3 dir = normalize(lens_point - light_pos);
+    float3 dir = normalize(lens_point - glint_pos);
     float3 pos = lens_point;
 
-    // Weight: light enters lens pupil, energy proportional to solid angle
-    // Each ray represents a fraction of the pupil area
-    // The Monte Carlo estimator: integral = (1/N) * sum(f(x_i) / p(x_i))
-    // p(x_i) = 1/(pi*R^2) for uniform disk sampling
-    // f(x_i) = spec_mult * cos(theta) / dist^2  (irradiance at lens point)
-    // So weight = f / p / N = spec_mult * cos * pi * R^2 / (dist^2 * N)
-    float light_dist = length(lens_point - light_pos);
-    float3 to_lens = normalize(lens_point - light_pos);
-    float cos_angle = max(abs(to_lens.z), 0.1f);
-    // Flare boost: real flares are visible because of high source brightness
-    // and sensor integration time. Scale up to make visible in our render.
-    float flare_boost = 500000.0;
+    // Weight
+    float glint_dist = length(lens_point - glint_pos);
+    float cos_angle = max(abs(dir.z), 0.1f);
+    float streak_boost = 10000.0;
     float weight = spec_mult * cos_angle * M_PI_F * lens_radius * lens_radius
-                   * flare_boost / (light_dist * light_dist * float(samples_per_light));
+                   * streak_boost / (glint_dist * glint_dist * float(samples_per_light));
 
-    float current_ri = 1.0;  // start in air (light is outside lens)
+    float current_ri = 1.0;
+    int reflections_done = 0;
 
     float z_front = scene.camera.lenses[0].z;
     float z_back = scene.camera.lenses[scene.camera.num_lenses - 1].z;
@@ -1333,19 +1361,14 @@ kernel void flare_kernel(
     float z_max = max(z_front, z_back) + z_margin;
     float z_min = min(z_front, z_back) - z_margin;
 
-    // Track reflections: require ONLY on the anamorphic cylinder (element 0)
-    // to produce horizontal streaks rather than circular blobs from spherical elements
-    int reflections = 0;
-    bool reflected_on_cylinder = false;
-    bool reflected_on_spherical = false;
-
     for (int bounce = 0; bounce < FLARE_MAX_BOUNCES; bounce++) {
-        if (weight < 1e-8) break;
+        if (weight < 1e-10) break;
 
         float nearest_t = 1e30;
         float3 nearest_isect;
         float3 nearest_normal;
         int nearest_elem = -1;
+        int nearest_surf_id = -1;
         float nearest_ri = 1.0;
 
         for (int e = 0; e < scene.camera.num_lenses; e++) {
@@ -1369,7 +1392,7 @@ kernel void flare_kernel(
                 float3 normal = is_cyl ? cylinder_normal(isect, fc_z, cyl_ang)
                                        : normalize(isect - float3(0, 0, fc_z));
                 nearest_t = t; nearest_isect = isect; nearest_normal = normal;
-                nearest_elem = e; nearest_ri = ri;
+                nearest_elem = e; nearest_ri = ri; nearest_surf_id = e * 2;
             }
 
             float abs_r2 = abs(elem.r2);
@@ -1385,43 +1408,22 @@ kernel void flare_kernel(
                 float3 normal = is_cyl ? cylinder_normal(isect, bc_z, cyl_ang)
                                        : normalize(isect - float3(0, 0, bc_z));
                 nearest_t = t; nearest_isect = isect; nearest_normal = normal;
-                nearest_elem = e; nearest_ri = ri;
+                nearest_elem = e; nearest_ri = ri; nearest_surf_id = e * 2 + 1;
             }
         }
 
-        // Aperture check: use a much larger flare aperture than the beauty aperture
-        // to allow off-axis rays that create long anamorphic streaks
-        float flare_aperture = max(scene.camera.aperture_radius * 8.0f, 0.05f);
-        if (flare_aperture > 0 && abs(dir.z) > 0.0001) {
-            float t_ap = (scene.camera.aperture_z - pos.z) / dir.z;
-            if (t_ap > LENS_EPS && (nearest_elem < 0 || t_ap < nearest_t)) {
-                float3 ap_hit = pos + t_ap * dir;
-                if (ap_hit.x * ap_hit.x + ap_hit.y * ap_hit.y >
-                    flare_aperture * flare_aperture)
-                    break;  // blocked by flare aperture
-            }
-        }
+        // No aperture clipping for flare path — allow full extent of streaks
 
         if (nearest_elem < 0) {
-            // Ray exits lens system
-            // Only accumulate if reflected ONLY on the anamorphic cylinder
-            // (no spherical element reflections) to get clean streaks
-            if (dir.z > 0 && reflected_on_cylinder && !reflected_on_spherical) {
-                // Intersect with sensor plane at z = cam_z
+            // Ray exits lens — if toward sensor and did 2 reflections, accumulate
+            if (dir.z > 0 && reflections_done == 2) {
                 float t_sensor = (scene.camera.cam_z - pos.z) / dir.z;
                 if (t_sensor > 0) {
                     float3 sensor_hit = pos + t_sensor * dir;
-
-                    // Map sensor hit to pixel coordinates
                     float aspect = float(width) / float(height);
                     float px = 0.5 - sensor_hit.x / (2.0 * scene.camera.cam_d * aspect);
                     float py = 0.5 - sensor_hit.y / (2.0 * scene.camera.cam_d);
 
-                    int ix = int(px * float(width));
-                    int iy = int(py * float(height));
-
-                    // Bilinear splatting: distribute contribution to 4 neighboring pixels
-                    // This smooths the sparse flare hits into a continuous streak
                     float fx = px * float(width) - 0.5;
                     float fy = py * float(height) - 0.5;
                     int ix0 = int(floor(fx));
@@ -1452,7 +1454,7 @@ kernel void flare_kernel(
             break;
         }
 
-        // Fresnel at surface
+        // Fresnel
         bool entering = (current_ri < 1.01);
         float n1 = current_ri;
         float n2 = entering ? nearest_ri : 1.0;
@@ -1463,37 +1465,28 @@ kernel void flare_kernel(
 
         float3 n = (dot(dir, nearest_normal) < 0) ? nearest_normal : -nearest_normal;
 
-        // Probabilistically reflect or refract
-        if (rng.uniform() < fresnel_r) {
-            // Reflect
+        // Force reflection at target surfaces
+        bool force_reflect = false;
+        if (reflections_done == 0 && nearest_surf_id == reflect_surf_1)
+            force_reflect = true;
+        else if (reflections_done == 1 && nearest_surf_id == reflect_surf_2)
+            force_reflect = true;
+
+        if (force_reflect) {
+            weight *= fresnel_r;
+            if (weight < 1e-10) break;
             dir = normalize(dir - 2.0 * dot(dir, n) * n);
             pos = nearest_isect;
-            reflections++;
-            if (scene.camera.lenses[nearest_elem].anamorphic > 0.5)
-                reflected_on_cylinder = true;
-            else
-                reflected_on_spherical = true;
+            reflections_done++;
         } else {
-            // Refract
+            weight *= (1.0 - fresnel_r);
+            if (weight < 1e-10) break;
             float eta = n1 / n2;
             float3 refracted = refract(dir, n, eta);
-            if (length(refracted) < 0.001) {
-                // Total internal reflection
-                dir = normalize(dir - 2.0 * dot(dir, n) * n);
-                pos = nearest_isect;
-                reflections++;
-                if (scene.camera.lenses[nearest_elem].anamorphic > 0.5)
-                    reflected_on_cylinder = true;
-                else
-                    reflected_on_spherical = true;
-            } else {
-                dir = refracted;
-                pos = nearest_isect;
-                current_ri = n2;
-            }
+            if (length(refracted) < 0.001) break;
+            dir = refracted;
+            pos = nearest_isect;
+            current_ri = n2;
         }
-
-        // Weight doesn't need Fresnel weighting since we're sampling probabilistically
-        // (Russian roulette: reflect with probability fresnel_r, refract with 1-fresnel_r)
     }
 }
