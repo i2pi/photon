@@ -853,6 +853,7 @@ lightT	*create_positional_light (float x, float y, float z, float color[4]) {
 	params_to_vector (x,y,z, &l->position);
 
 	memcpy (l->color, color, sizeof(float)*4);
+	l->specular = 1.0f;
 
 	l->gl_draw = positional_light_gl_draw;
 

@@ -57,6 +57,7 @@ typedef struct lightT {
 	// TODO: we'll just do positional lights for now
 	vectorT	position;
 	float	color[4];
+	float	specular;
 
 #ifndef NO_GL
 	GLenum	GL_LIGHT;

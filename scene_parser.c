@@ -201,6 +201,7 @@ sceneT *load_scene(const char *filename, render_settingsT *settings) {
 			}
 
 			lightT *l = create_positional_light(x, y, z, color);
+			l->specular = get_kv_float(tokens, n, "specular", 1.0);
 			add_light_to_scene(s, l);
 
 		} else {

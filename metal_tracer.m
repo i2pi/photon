@@ -24,6 +24,7 @@ typedef struct {
 typedef struct {
     float px, py, pz, pw;
     float color_r, color_g, color_b, color_a;
+    float specular, pad_l1, pad_l2, pad_l3;
 } GPULight;
 
 typedef struct {
@@ -386,6 +387,7 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             gpu_scene.lights[i].color_g = l->color[1];
             gpu_scene.lights[i].color_b = l->color[2];
             gpu_scene.lights[i].color_a = l->color[3];
+            gpu_scene.lights[i].specular = l->specular;
         }
 
         // Create buffers

@@ -18,6 +18,7 @@ struct GPUSurface {
 struct GPULight {
     float px, py, pz, pw;
     float color_r, color_g, color_b, color_a;
+    float specular, pad_l1, pad_l2, pad_l3;
 };
 
 struct GPULensElement {
@@ -786,13 +787,16 @@ float3 trace_ray(float3 origin, float3 direction,
                 float specular = dot(refl_dir, ray_dir);
                 if (specular < 0) specular = 0;
 
+                float spec_mult = scene.lights[i].specular;
                 float phong = (1.0 - surf.transparency) * diffuse * 0.9 +
-                              pow(specular, 35.0) * surf.reflectance;
+                              pow(specular, 35.0) * surf.reflectance * spec_mult;
 
                 accumulated += throughput * phong * color.rgb *
                               float3(light_color.r, light_color.g, light_color.b) /
                               (1.0 + light_dist * 0.0001);
             }
+
+
         }
 
         // Choose next bounce: reflection or refraction
@@ -935,9 +939,20 @@ kernel void trace_kernel(
         bool dispersive = false;
 
         if (scene.camera.num_lenses > 0) {
-            // Aim ray at lens center — minimal DOF, full anamorphic dispersion
+            // DOF: stratified lens sampling
             constant GPULensElement &front = scene.camera.lenses[0];
-            lens_point = float3(0, 0, front.z);
+            float dof_radius = front.radius;
+            for (int le = 1; le < scene.camera.num_lenses; le++)
+                dof_radius = min(dof_radius, scene.camera.lenses[le].radius);
+            if (scene.camera.aperture_radius > 0)
+                dof_radius = min(dof_radius, scene.camera.aperture_radius);
+            float angle = 2.0 * M_PI_F * fract(float(seq_idx) * 0.7548776662 + pixel_rand_a);
+            float rad = dof_radius * sqrt(fract(float(seq_idx) * 0.3247179572 + pixel_rand_b));
+            lens_point = float3(
+                rad * cos(angle),
+                rad * sin(angle),
+                front.z
+            );
 
             float3 ray_dir = normalize(lens_point - sensor_origin);
 
