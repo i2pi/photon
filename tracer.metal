@@ -978,7 +978,7 @@ kernel void trace_kernel(
         // Soft firefly clamp: smoothly compress bright outliers
         // Values below threshold pass unchanged; above, they're compressed
         float lum_check = color.r + color.g + color.b;
-        float clamp_knee = 2.5;
+        float clamp_knee = 10.0;
         if (lum_check > clamp_knee) {
             float excess = lum_check - clamp_knee;
             float compressed = clamp_knee + clamp_knee * excess / (clamp_knee + excess);
