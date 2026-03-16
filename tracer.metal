@@ -1240,7 +1240,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 0.0;
+    float ghost_boost = 3.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
@@ -1271,7 +1271,7 @@ kernel void flare_kernel(
     if (scene.camera.num_lenses <= 0) return;
 
     int total_lights = scene.num_lights;
-    int samples_per_light = 262144;  // 256K samples per light for dense flare coverage
+    int samples_per_light = 1048576;  // 1M samples per light for smooth flare coverage
     int total_samples = total_lights * samples_per_light;
     if ((int)tid >= total_samples) return;
 
