@@ -1190,14 +1190,14 @@ kernel void ghost_kernel(
 
         // Spectral sampling: chromatic fringing along the streak
         // Different wavelengths are displaced differently by the anamorphic element
-        for (int wi = 0; wi < 8; wi++) {
+        for (int wi = 0; wi < 16; wi++) {
             float wavelength = 380.0 + 400.0 * fract(float(wi) * 0.6180339887 + pixel_rand_w);
 
             // Chromatic shift: shorter wavelengths displaced more
             // (higher refractive index from Cauchy dispersion)
             float ref_wl = 550.0;  // reference wavelength
             float wl_shift = (ref_wl - wavelength) / 400.0;  // normalized [-0.425, +0.425]
-            float chromatic_offset = wl_shift * anamorphic_dispersion * 4000.0;
+            float chromatic_offset = wl_shift * anamorphic_dispersion * 8000.0;
 
             // Effective along-streak position for this wavelength
             float effective_along = along_streak - chromatic_offset;
@@ -1209,7 +1209,7 @@ kernel void ghost_kernel(
 
             float3 wl_color = wavelength_to_rgb(wavelength, spec_norm);
             // Streak intensity
-            float ghost_strength = 0.02;
+            float ghost_strength = 0.04;
             float3 contrib = src_lum * ghost_strength * eff_total * wl_color;
 
             ghost_R += contrib.r;
@@ -1218,7 +1218,7 @@ kernel void ghost_kernel(
         }
     }
 
-    float ginv = 1.0 / 8.0;  // normalize by spectral sample count
+    float ginv = 1.0 / 16.0;  // normalize by spectral sample count
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = ghost_R * ginv;
     ghost_buf[gidx + 1] = ghost_G * ginv;
