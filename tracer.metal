@@ -1176,7 +1176,7 @@ kernel void ghost_kernel(
         // Streak profile: tight perpendicular (Gaussian), wide along streak
         // The streak width along the axis scales with source brightness
         float perp_sigma = 2.0;  // tight perpendicular falloff (pixels)
-        float along_scale = max(src_lum * 2.0, 50.0);  // streak length scales with brightness
+        float along_scale = max(src_lum * 20.0, 200.0);  // streak length scales with brightness
         float perp_weight = exp(-0.5 * (perp_streak * perp_streak) / (perp_sigma * perp_sigma));
         float along_dist = abs(along_streak);
 
@@ -1197,7 +1197,7 @@ kernel void ghost_kernel(
             // (higher refractive index from Cauchy dispersion)
             float ref_wl = 550.0;  // reference wavelength
             float wl_shift = (ref_wl - wavelength) / 400.0;  // normalized [-0.425, +0.425]
-            float chromatic_offset = wl_shift * anamorphic_dispersion * 800.0;
+            float chromatic_offset = wl_shift * anamorphic_dispersion * 4000.0;
 
             // Effective along-streak position for this wavelength
             float effective_along = along_streak - chromatic_offset;
