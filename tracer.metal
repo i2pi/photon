@@ -1004,7 +1004,7 @@ kernel void trace_kernel(
 
         // Soft firefly clamp: smoothly compress bright outliers
         float lum_check = color.r + color.g + color.b;
-        float clamp_knee = 5.0;
+        float clamp_knee = 12.0;
         if (lum_check > clamp_knee) {
             float excess = lum_check - clamp_knee;
             float compressed = clamp_knee + clamp_knee * excess / (clamp_knee + excess);
@@ -1251,7 +1251,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 5.0;
+    float ghost_boost = 12.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
