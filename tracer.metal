@@ -1147,30 +1147,39 @@ kernel void ghost_kernel(
                         ghost_G += gc.g;
                         ghost_B += gc.b;
                     } else if (scene.spheres[si].is_lens < 0.5 && scene.spheres[si].phong > 1.0) {
-                        // Scene object: check if this hit point is a specular glint
-                        // (would the emissive source be visible in reflection here?)
+                        // Scene glass object: compute specular lighting at hit point
+                        // to find if this is a glint location (same calculation as main kernel)
                         float3 hit_pt = ghost_origin + gt * ghost_dir;
                         float3 hit_n = normalize(hit_pt - sc);
 
-                        for (int ei = 0; ei < scene.num_spheres; ei++) {
-                            if (scene.spheres[ei].emission < 1.0) continue;
-                            float3 ec = float3(scene.spheres[ei].cx,
-                                               scene.spheres[ei].cy,
-                                               scene.spheres[ei].cz);
-                            // Use canonical view dir (camera to hit point) for consistency
-                            float3 view_dir = normalize(hit_pt - float3(0, 0, scene.camera.cam_z));
-                            float3 refl_view = view_dir - 2.0 * dot(view_dir, hit_n) * hit_n;
-                            float3 to_emissive = normalize(ec - hit_pt);
-                            float alignment = dot(refl_view, to_emissive);
+                        // Compute specular from lights (same as trace_ray direct lighting)
+                        float3 canonical_view = normalize(hit_pt - float3(0, 0, scene.camera.cam_z));
+                        float3 refl_view = canonical_view - 2.0 * dot(canonical_view, hit_n) * hit_n;
+
+                        float n_ior = scene.spheres[si].cauchy_a;
+                        float f0 = ((n_ior - 1.0) / (n_ior + 1.0)) * ((n_ior - 1.0) / (n_ior + 1.0));
+
+                        for (int li = 0; li < scene.num_lights; li++) {
+                            float3 lp = float3(scene.lights[li].px,
+                                               scene.lights[li].py,
+                                               scene.lights[li].pz);
+                            float3 to_light = normalize(lp - hit_pt);
+                            float refl_cos = dot(refl_view, to_light);
 
                             float glint_size = 1.0 / scene.spheres[si].phong;
-                            if (alignment > (1.0 - glint_size)) {
-                                float t = (alignment - (1.0 - glint_size)) / glint_size;
-                                // Treat glint as emissive point source
-                                float3 gc = float3(scene.spheres[ei].color_r,
-                                                   scene.spheres[ei].color_g,
-                                                   scene.spheres[ei].color_b);
-                                gc *= scene.spheres[ei].emission * gw * t * t * 0.05;
+                            if (refl_cos > (1.0 - glint_size)) {
+                                float t_val = (refl_cos - (1.0 - glint_size)) / glint_size;
+                                float cos_i = max(dot(hit_n, to_light), 0.0f);
+                                float fresnel = f0 + (1.0 - f0) * pow(1.0 - cos_i, 5.0);
+                                float spec_mult = scene.lights[li].specular;
+                                float effective_mult = spec_mult;
+                                float light_dist = length(lp - hit_pt);
+                                float atten = 1.0 / (1.0 + light_dist * 0.0001);
+
+                                float3 lc = float3(scene.lights[li].color_r,
+                                                   scene.lights[li].color_g,
+                                                   scene.lights[li].color_b);
+                                float3 gc = lc * atten * t_val * t_val * fresnel * effective_mult * gw;
                                 gc *= wavelength_to_rgb(wavelength, spec_norm);
                                 ghost_R += gc.r;
                                 ghost_G += gc.g;
