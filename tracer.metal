@@ -1321,7 +1321,7 @@ kernel void flare_kernel(
     float cos_angle = max(abs(to_lens.z), 0.1f);
     // Flare boost: real flares are visible because of high source brightness
     // and sensor integration time. Scale up to make visible in our render.
-    float flare_boost = 0.0;  // disabled for debugging
+    float flare_boost = 500000.0;
     float weight = spec_mult * cos_angle * M_PI_F * lens_radius * lens_radius
                    * flare_boost / (light_dist * light_dist * float(samples_per_light));
 
