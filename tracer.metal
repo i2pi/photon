@@ -1190,10 +1190,10 @@ kernel void ghost_kernel(
                     float3 surf_color = float3(surf.color_r, surf.color_g, surf.color_b);
                     float3 ghost_contrib = float3(0);
 
-                    // Emissive contribution
+                    // Emissive contribution (reduced weight — ghosts are primarily from specular highlights)
                     if (surf.emission > 0) {
                         debug_emissive_hits += 1.0;
-                        ghost_contrib += surf_color * surf.emission;
+                        ghost_contrib += surf_color * surf.emission * 0.05;
                     }
 
                     // Ghost evaluates what the main camera would see at this hit point.
@@ -1215,7 +1215,11 @@ kernel void ghost_kernel(
                             float light_dist = length(lp - hit_point);
                             float atten = 1.0 / (1.0 + light_dist * 0.0001);
 
-                            // Specular only — ghosts should come from bright highlights, not diffuse
+                            // Diffuse contribution (weighted down)
+                            float diffuse = max(dot(normal, incidence), 0.0f);
+                            float diff_term = (1.0 - surf.transparency) * diffuse * 0.3 * scene.lights[li].diffuse_mult;
+                            ghost_contrib += diff_term * surf_color * lc * atten;
+                            // Specular contribution
                             float refl_cos = dot(refl_view, incidence);
                             float spec_mult = scene.lights[li].specular;
                             if (surf.phong > 1.0 && refl_cos > 0 && spec_mult > 0) {
@@ -1244,9 +1248,10 @@ kernel void ghost_kernel(
         }
     }
 
-    // Normalize: average over GHOST_SAMPLES * num_ghost_pairs (Monte Carlo estimator)
-    float ginv = 1.0 / float(GHOST_SAMPLES * max(scene.camera.num_ghost_pairs, 1));
-    float ghost_boost = 1.0;
+    // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
+    // Sum over ghost pairs is the physical total ghost contribution
+    float ginv = 1.0 / float(GHOST_SAMPLES);
+    float ghost_boost = 5.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;

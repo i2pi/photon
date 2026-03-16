@@ -1,7 +1,7 @@
 # Glass spheres scene — pink sphere with nested glass shells
 # 3-element lens: crown biconvex, anamorphic cylinder, flint meniscus
 
-render width=512 height=512 min_samples=512 max_samples=4000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=0 exposure=0.25 contrast=1.5
+render width=512 height=512 min_samples=512 max_samples=4000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=1 exposure=0.25 contrast=1.5
 
 camera z=0.5 d=0.50
 aperture z=-0.02 radius=0.015
@@ -33,6 +33,6 @@ light pos=0,8,5 intensity=4.0
 light pos=8,-3,3 intensity=2.5
 light pos=-8,-3,3 intensity=2.5
 # Specular-only lights for bright glints that drive ghost streaks
-light pos=5,-4,3 intensity=3.0 specular=50.0 diffuse=0.0
-light pos=-4,5,3 intensity=2.5 specular=40.0 diffuse=0.0
+light pos=5,-4,3 intensity=5.0 specular=150.0 diffuse=0.0
+light pos=-4,5,3 intensity=4.0 specular=120.0 diffuse=0.0
 
