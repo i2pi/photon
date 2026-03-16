@@ -426,6 +426,7 @@ objectT *create_lens_object (float z, float r1, float r2, float R) {
 	surf->parameter[1] = r1;
 	surf->parameter[2] = r2;
 	surf->parameter[3] = R;
+	surf->properties.is_lens = 1.0f;
 
 	return (obj);
 }

@@ -18,7 +18,7 @@ typedef struct {
     float cx, cy, cz, radius;
     float color_r, color_g, color_b, color_a;
     float reflectance, roughness, transparency, cauchy_a;
-    float cauchy_b, emission, phong, pad_s3;
+    float cauchy_b, emission, phong, is_lens;
 } GPUSurface;
 
 typedef struct {
@@ -175,6 +175,7 @@ static void pack_surface(objectT *obj, int surf_idx, GPUSurface *out) {
     out->cauchy_b = s->properties.cauchy_b;
     out->emission = s->properties.emission;
     out->phong = s->properties.phong;
+    out->is_lens = s->properties.is_lens;
 }
 
 // --- BVH build (top-down median split) ---

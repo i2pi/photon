@@ -12,7 +12,7 @@ struct GPUSurface {
     float cx, cy, cz, radius;
     float color_r, color_g, color_b, color_a;
     float reflectance, roughness, transparency, cauchy_a;
-    float cauchy_b, emission, phong, pad_s3;
+    float cauchy_b, emission, phong, is_lens;
 };
 
 struct GPULight {
@@ -800,8 +800,8 @@ float3 trace_ray(float3 origin, float3 direction,
                 float glint_size = 1.0 / surf.phong;
                 float spec_mult = scene.lights[i].specular;
                 float spec_term = 0.0;
-                // Only apply boosted specular to surfaces with explicit phong (not lens elements)
-                float effective_mult = (surf.phong > 36.0) ? spec_mult : 1.0;
+                // Don't apply boosted specular to lens elements
+                float effective_mult = (surf.is_lens < 0.5) ? spec_mult : 1.0;
                 if (refl_cos > (1.0 - glint_size)) {
                     float t = (refl_cos - (1.0 - glint_size)) / glint_size;
                     spec_term = t * t * fresnel * effective_mult;
@@ -1146,33 +1146,31 @@ kernel void ghost_kernel(
                         ghost_R += gc.r;
                         ghost_G += gc.g;
                         ghost_B += gc.b;
-                    } else if (scene.spheres[si].transparency > 0.5) {
-                        // Glass sphere: reflect ghost ray, check for emissive sources
+                    } else if (scene.spheres[si].is_lens < 0.5 && scene.spheres[si].phong > 1.0) {
+                        // Scene object: check if this hit point is a specular glint
+                        // (would the emissive source be visible in reflection here?)
                         float3 hit_pt = ghost_origin + gt * ghost_dir;
                         float3 hit_n = normalize(hit_pt - sc);
-                        float3 refl = ghost_dir - 2.0 * dot(ghost_dir, hit_n) * hit_n;
 
-                        // Fresnel reflectance at this angle
-                        float n_ior = scene.spheres[si].cauchy_a;
-                        float f0 = ((n_ior - 1.0) / (n_ior + 1.0)) * ((n_ior - 1.0) / (n_ior + 1.0));
-                        float cos_i = max(-dot(ghost_dir, hit_n), 0.0f);
-                        float fresnel = f0 + (1.0 - f0) * pow(1.0 - cos_i, 5.0);
-
-                        // Check if reflected direction points at any emissive sphere
                         for (int ei = 0; ei < scene.num_spheres; ei++) {
                             if (scene.spheres[ei].emission < 1.0) continue;
                             float3 ec = float3(scene.spheres[ei].cx,
                                                scene.spheres[ei].cy,
                                                scene.spheres[ei].cz);
+                            // Use canonical view dir (camera to hit point) for consistency
+                            float3 view_dir = normalize(hit_pt - float3(0, 0, scene.camera.cam_z));
+                            float3 refl_view = view_dir - 2.0 * dot(view_dir, hit_n) * hit_n;
                             float3 to_emissive = normalize(ec - hit_pt);
-                            float alignment = dot(refl, to_emissive);
-                            // Angular threshold for ghost generation
-                            if (alignment > 0.97) {
-                                float t = (alignment - 0.97) / 0.03;
+                            float alignment = dot(refl_view, to_emissive);
+
+                            float glint_size = 1.0 / scene.spheres[si].phong;
+                            if (alignment > (1.0 - glint_size)) {
+                                float t = (alignment - (1.0 - glint_size)) / glint_size;
+                                // Treat glint as emissive point source
                                 float3 gc = float3(scene.spheres[ei].color_r,
                                                    scene.spheres[ei].color_g,
                                                    scene.spheres[ei].color_b);
-                                gc *= scene.spheres[ei].emission * gw * max(fresnel, 0.05f) * t;
+                                gc *= scene.spheres[ei].emission * gw * t * t * 0.05;
                                 gc *= wavelength_to_rgb(wavelength, spec_norm);
                                 ghost_R += gc.r;
                                 ghost_G += gc.g;

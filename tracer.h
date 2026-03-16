@@ -38,6 +38,7 @@ typedef struct {
 	float	cauchy_b;		// λ in micrometers. B=0 for non-dispersive
 	float	emission;		// emissive intensity (0 = not emissive)
 	float	phong;		// Phong specular exponent
+	float	is_lens;	// 1.0 if this is a lens element, 0.0 otherwise
 } surface_propertiesT;
 
 typedef struct surfaceT {
