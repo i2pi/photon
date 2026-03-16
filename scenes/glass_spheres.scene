@@ -1,7 +1,7 @@
 # Glass spheres scene — pink sphere with nested glass shells
 # 3-element lens: crown biconvex, anamorphic cylinder, flint meniscus
 
-render width=512 height=512 min_samples=128 max_samples=2000 qual_thresh=0.01 trace_depth=32 shadow_rays=0 ghost_rays=1
+render width=1024 height=1024 min_samples=128 max_samples=2000 qual_thresh=0.01 trace_depth=32 shadow_rays=0 ghost_rays=1
 
 camera z=0.5 d=0.50
 aperture z=-0.02 radius=0.15
