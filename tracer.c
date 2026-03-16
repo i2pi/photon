@@ -854,6 +854,7 @@ lightT	*create_positional_light (float x, float y, float z, float color[4]) {
 
 	memcpy (l->color, color, sizeof(float)*4);
 	l->specular = 1.0f;
+l->diffuse_mult = 1.0f;
 
 	l->gl_draw = positional_light_gl_draw;
 
@@ -1092,7 +1093,7 @@ rayT	*cast_ray (rayT *ray, sceneT *scene, int depth) {
 		if (diffuse < 0) diffuse = 0;
 		if (specular <0) specular= 0;
 
-		// TODO: put shininess in properties
+		// TODO: put phong in properties
 		phong = (1.0 - properties.transparency) * diffuse * 0.9f +
 				powf(specular, 35.0f) * properties.reflectance;
 

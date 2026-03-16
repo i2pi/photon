@@ -12,13 +12,13 @@ struct GPUSurface {
     float cx, cy, cz, radius;
     float color_r, color_g, color_b, color_a;
     float reflectance, roughness, transparency, cauchy_a;
-    float cauchy_b, emission, pad_s2, pad_s3;
+    float cauchy_b, emission, phong, pad_s3;
 };
 
 struct GPULight {
     float px, py, pz, pw;
     float color_r, color_g, color_b, color_a;
-    float specular, pad_l1, pad_l2, pad_l3;
+    float specular, diffuse_mult, pad_l2, pad_l3;
 };
 
 struct GPULensElement {
@@ -782,18 +782,35 @@ float3 trace_ray(float3 origin, float3 direction,
                 float diffuse = dot(normal, incidence);
                 if (diffuse < 0) diffuse = 0;
 
-                // Reflect incidence about normal (same as CPU reflect_vector)
-                float3 refl_dir = normalize(incidence - 2.0 * dot(incidence, normal) * normal);
-                float specular = dot(refl_dir, ray_dir);
-                if (specular < 0) specular = 0;
+                // Fresnel specular: reflect view ray, check if it points at light
+                float3 refl_view = ray_dir - 2.0 * dot(ray_dir, normal) * normal;
+                float3 to_light = normalize(light_pos - hit_point);
+                float refl_cos = dot(refl_view, to_light);
 
+                // Schlick Fresnel: F0 from refractive index
+                float n_ior = surf.cauchy_a;
+                float f0 = ((n_ior - 1.0) / (n_ior + 1.0)) * ((n_ior - 1.0) / (n_ior + 1.0));
+                float cos_i = max(dot(normal, to_light), 0.0f);
+                float fresnel = f0 + (1.0 - f0) * pow(1.0 - cos_i, 5.0);
+
+                // Glint: tight cone around perfect reflection
+                float glint_size = 1.0 / surf.phong;
                 float spec_mult = scene.lights[i].specular;
-                float phong = (1.0 - surf.transparency) * diffuse * 0.9 +
-                              pow(specular, 35.0) * surf.reflectance * spec_mult;
+                float spec_term = 0.0;
+                // Only apply boosted specular to surfaces with explicit phong (not lens elements)
+                float effective_mult = (surf.phong > 36.0) ? spec_mult : 1.0;
+                if (refl_cos > (1.0 - glint_size)) {
+                    float t = (refl_cos - (1.0 - glint_size)) / glint_size;
+                    spec_term = t * t * fresnel * effective_mult;
+                }
 
-                accumulated += throughput * phong * color.rgb *
-                              float3(light_color.r, light_color.g, light_color.b) /
-                              (1.0 + light_dist * 0.0001);
+                float diff_term = (1.0 - surf.transparency) * diffuse * 0.9 * scene.lights[i].diffuse_mult;
+
+                float3 lc = float3(light_color.r, light_color.g, light_color.b);
+                float atten = 1.0 / (1.0 + light_dist * 0.0001);
+                // Specular glints bypass throughput tinting — always white
+                accumulated += throughput * diff_term * color.rgb * lc * atten;
+                accumulated += spec_term * lc * atten;
             }
 
 

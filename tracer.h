@@ -37,6 +37,7 @@ typedef struct {
 	float	cauchy_a;		// refractive index: n(λ) = A + B/λ²
 	float	cauchy_b;		// λ in micrometers. B=0 for non-dispersive
 	float	emission;		// emissive intensity (0 = not emissive)
+	float	phong;		// Phong specular exponent
 } surface_propertiesT;
 
 typedef struct surfaceT {
@@ -58,6 +59,7 @@ typedef struct lightT {
 	vectorT	position;
 	float	color[4];
 	float	specular;
+	float	diffuse_mult;
 
 #ifndef NO_GL
 	GLenum	GL_LIGHT;

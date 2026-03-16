@@ -18,13 +18,13 @@ typedef struct {
     float cx, cy, cz, radius;
     float color_r, color_g, color_b, color_a;
     float reflectance, roughness, transparency, cauchy_a;
-    float cauchy_b, emission, pad_s2, pad_s3;
+    float cauchy_b, emission, phong, pad_s3;
 } GPUSurface;
 
 typedef struct {
     float px, py, pz, pw;
     float color_r, color_g, color_b, color_a;
-    float specular, pad_l1, pad_l2, pad_l3;
+    float specular, diffuse_mult, pad_l2, pad_l3;
 } GPULight;
 
 typedef struct {
@@ -174,6 +174,7 @@ static void pack_surface(objectT *obj, int surf_idx, GPUSurface *out) {
     out->cauchy_a = s->properties.cauchy_a;
     out->cauchy_b = s->properties.cauchy_b;
     out->emission = s->properties.emission;
+    out->phong = s->properties.phong;
 }
 
 // --- BVH build (top-down median split) ---
@@ -388,6 +389,7 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             gpu_scene.lights[i].color_b = l->color[2];
             gpu_scene.lights[i].color_a = l->color[3];
             gpu_scene.lights[i].specular = l->specular;
+            gpu_scene.lights[i].diffuse_mult = l->diffuse_mult;
         }
 
         // Create buffers

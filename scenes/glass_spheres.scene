@@ -1,13 +1,13 @@
 # Glass spheres scene — pink sphere with nested glass shells
 # 3-element lens: crown biconvex, anamorphic cylinder, flint meniscus
 
-render width=512 height=512 min_samples=128 max_samples=2000 qual_thresh=0.01 trace_depth=32 shadow_rays=0 ghost_rays=1 exposure=0.12 contrast=1.3
+render width=512 height=512 min_samples=128 max_samples=2000 qual_thresh=0.01 trace_depth=32 shadow_rays=0 ghost_rays=1 exposure=0.2 contrast=1.3
 
 camera z=0.5 d=0.50
 aperture z=-0.02 radius=0.04
 
 # Anamorphic cylinder (front element)
-lens z=0.000  r1=-0.8  r2=0.9   radius=0.15 cauchy_a=1.02 cauchy_b=0.02 reflectance=0.01 anamorphic=90
+#lens z=0.000  r1=-0.8  r2=0.9   radius=0.15 cauchy_a=1.02 cauchy_b=0.02 reflectance=0.01 anamorphic=90
 # Petzval Group 1: crown biconvex + flint meniscus
 lens z=-0.015 r1=1.15  r2=1.15  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflectance=0.03
 lens z=-0.027 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.05
@@ -16,22 +16,22 @@ lens z=-0.042 r1=1.60  r2=1.60  radius=0.15 cauchy_a=1.52 cauchy_b=0.005 reflect
 lens z=-0.054 r1=-2.0  r2=2.5   radius=0.15 cauchy_a=1.62 cauchy_b=0.025 reflectance=0.06
 
 # Pink center sphere
-sphere pos=-0.3000,0.0,-3.05 radius=0.9 color=0.99,0.58,0.62 roughness=1.0 reflectance=0.0
+#sphere pos=-0.3000,0.0,-3.05 radius=0.9 color=0.99,0.58,0.62 roughness=1.0 reflectance=0.0
 
 # Glass shells
-sphere pos=0.0788,0.0,-3.05 radius=1.0400 color=0.5,0.75,0.75 transparency=0.92 reflectance=0.08 cauchy_a=1.1000 cauchy_b=0.01
-sphere pos=0.0401,0.0,-3.05 radius=1.3792 color=0.5,0.75,0.75 transparency=0.91 reflectance=0.03 cauchy_a=1.1869 cauchy_b=0.01
-sphere pos=-0.0122,0.0,-3.05 radius=1.6597 color=0.5,0.75,0.75 transparency=0.98 reflectance=0.02 cauchy_a=1.3739 cauchy_b=0.01
-sphere pos=-0.0760,0.0,-3.05 radius=1.4722 color=0.5,0.75,0.75 transparency=0.95 reflectance=0.05 cauchy_a=1.3608 cauchy_b=0.01
-sphere pos=-0.1486,0.0,-3.05 radius=1.0780 color=0.5,0.75,0.75 transparency=0.92 reflectance=0.08 cauchy_a=1.2477 cauchy_b=0.01
-sphere pos=-0.2274,0.0,-3.05 radius=1.2816 color=0.5,0.75,0.75 transparency=0.94 reflectance=0.10 cauchy_a=1.2347 cauchy_b=0.03
+sphere pos=0.0788,0.0,-3.05 radius=1.0400 color=0.5,0.75,0.75 transparency=0.92 reflectance=0.08 cauchy_a=1.1000 cauchy_b=0.01 phong=5000
+sphere pos=0.0401,0.0,-3.05 radius=1.3792 color=0.5,0.75,0.75 transparency=0.91 reflectance=0.03 cauchy_a=1.1869 cauchy_b=0.01 phong=5000
+sphere pos=-0.0122,0.0,-3.05 radius=1.6597 color=0.5,0.75,0.75 transparency=0.98 reflectance=0.02 cauchy_a=1.3739 cauchy_b=0.01 phong=5000
+sphere pos=-0.0760,0.0,-3.05 radius=1.4722 color=0.5,0.75,0.75 transparency=0.95 reflectance=0.05 cauchy_a=1.3608 cauchy_b=0.01 phong=5000
+sphere pos=-0.1486,0.0,-3.05 radius=1.0780 color=0.5,0.75,0.75 transparency=0.92 reflectance=0.08 cauchy_a=1.2477 cauchy_b=0.01 phong=5000
+sphere pos=-0.2274,0.0,-3.05 radius=1.2816 color=0.5,0.75,0.75 transparency=0.94 reflectance=0.10 cauchy_a=1.2347 cauchy_b=0.03 phong=5000
 
 # Background plane
-plane normal=0,0,1 d=-10 color=1.0,1.0,1.0 emission=0.0 reflectance=0.0 roughness=0.0
+#plane normal=0,0,1 d=-10 color=1.0,1.0,1.0 emission=0.0 reflectance=0.0 roughness=0.0
 
 # Lights
 light pos=-1,7,5 intensity=1.8
 light pos=7,-5,4 intensity=1.7
 light pos=-7,-5,1 intensity=1.8
 # Bright source behind camera for specular highlights on glass
-light pos=1.0,-4.3,2.5 intensity=2.0 specular=100.0
+light pos=4.5,-5,2.5 intensity=20.0 specular=200.0 diffuse=0.0
