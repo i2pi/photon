@@ -1243,7 +1243,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 0.0;
+    float ghost_boost = 15.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
@@ -1333,7 +1333,7 @@ kernel void flare_kernel(
     // Weight
     float glint_dist = length(lens_point - glint_pos);
     float cos_angle = max(abs(dir.z), 0.1f);
-    float streak_boost = 5000.0;
+    float streak_boost = 0.0;
     float weight = spec_mult * cos_angle * M_PI_F * lens_radius * lens_radius
                    * streak_boost / (glint_dist * glint_dist * float(samples_per_light));
 
