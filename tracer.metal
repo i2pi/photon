@@ -694,8 +694,10 @@ float3 perturb_normal(float3 n, float roughness, thread RNG &rng) {
 
 float3 trace_ray(float3 origin, float3 direction,
                  constant GPUScene &scene, thread RNG &rng, float wavelength,
-                 thread int &out_bounces, thread bool &hit_dispersive) {
+                 thread int &out_bounces, thread bool &hit_dispersive,
+                 thread float3 &out_glint) {
     float3 accumulated = float3(0);
+    out_glint = float3(0);
     float3 throughput = float3(1);
     // Don't reset hit_dispersive — caller may have set it (e.g. from lens system)
 
@@ -782,8 +784,9 @@ float3 trace_ray(float3 origin, float3 direction,
                 float diffuse = dot(normal, incidence);
                 if (diffuse < 0) diffuse = 0;
 
-                // Fresnel specular: reflect view ray, check if it points at light
-                float3 refl_view = ray_dir - 2.0 * dot(ray_dir, normal) * normal;
+                // Fresnel specular: use canonical view direction (wavelength-independent)
+                float3 canonical_view = normalize(hit_point - float3(0, 0, scene.camera.cam_z));
+                float3 refl_view = canonical_view - 2.0 * dot(canonical_view, normal) * normal;
                 float3 to_light = normalize(light_pos - hit_point);
                 float refl_cos = dot(refl_view, to_light);
 
@@ -808,9 +811,9 @@ float3 trace_ray(float3 origin, float3 direction,
 
                 float3 lc = float3(light_color.r, light_color.g, light_color.b);
                 float atten = 1.0 / (1.0 + light_dist * 0.0001);
-                // Specular glints bypass throughput tinting — always white
                 accumulated += throughput * diff_term * color.rgb * lc * atten;
-                accumulated += spec_term * lc * atten;
+                // Specular glints bypass wavelength weighting — always white
+                out_glint += spec_term * lc * atten;
             }
 
 
@@ -984,8 +987,9 @@ kernel void trace_kernel(
         }
 
         int bounces = 0;
+        float3 glint = float3(0);
         float3 color = trace_ray(cam_origin, cam_dir, scene, rng, wavelength,
-                                 bounces, dispersive);
+                                 bounces, dispersive, glint);
 
         // Spectral weighting: only apply when ray hit dispersive material
         // Non-dispersive paths use white light to avoid colored noise
@@ -1005,6 +1009,9 @@ kernel void trace_kernel(
             float compressed = clamp_knee + clamp_knee * excess / (clamp_knee + excess);
             color *= compressed / lum_check;
         }
+
+        // Add glint separately — no wavelength weighting, no firefly clamp
+        color += glint;
 
         R += color.r;
         G += color.g;
@@ -1104,7 +1111,6 @@ kernel void ghost_kernel(
 
             if (gw > 0.0001) {
                 for (int si = 0; si < scene.num_spheres; si++) {
-                    if (scene.spheres[si].emission < 1.0) continue;
                     float3 sc = float3(scene.spheres[si].cx,
                                        scene.spheres[si].cy,
                                        scene.spheres[si].cz);
@@ -1112,17 +1118,55 @@ kernel void ghost_kernel(
                     float3 oc = ghost_origin - sc;
                     float gb = dot(oc, ghost_dir);
                     float gc_disc = gb * gb - (dot(oc, oc) - sr * sr);
-                    if (gc_disc > 0) {
-                        float gt = -gb - sqrt(gc_disc);
-                        if (gt > 0.001) {
-                            float3 gc = float3(scene.spheres[si].color_r,
-                                               scene.spheres[si].color_g,
-                                               scene.spheres[si].color_b);
-                            gc *= scene.spheres[si].emission * gw;
-                            gc *= wavelength_to_rgb(wavelength, spec_norm);
-                            ghost_R += gc.r;
-                            ghost_G += gc.g;
-                            ghost_B += gc.b;
+                    if (gc_disc <= 0) continue;
+                    float gt = -gb - sqrt(gc_disc);
+                    if (gt < 0.001) continue;
+
+                    if (scene.spheres[si].emission >= 1.0) {
+                        // Direct hit on emissive sphere
+                        float3 gc = float3(scene.spheres[si].color_r,
+                                           scene.spheres[si].color_g,
+                                           scene.spheres[si].color_b);
+                        gc *= scene.spheres[si].emission * gw;
+                        gc *= wavelength_to_rgb(wavelength, spec_norm);
+                        ghost_R += gc.r;
+                        ghost_G += gc.g;
+                        ghost_B += gc.b;
+                    } else if (scene.spheres[si].transparency > 0.5) {
+                        // Glass sphere: reflect ghost ray, check for emissive sources
+                        float3 hit_pt = ghost_origin + gt * ghost_dir;
+                        float3 hit_n = normalize(hit_pt - sc);
+                        float3 refl = ghost_dir - 2.0 * dot(ghost_dir, hit_n) * hit_n;
+
+                        // Fresnel reflectance at this angle
+                        float n_ior = scene.spheres[si].cauchy_a;
+                        float f0 = ((n_ior - 1.0) / (n_ior + 1.0)) * ((n_ior - 1.0) / (n_ior + 1.0));
+                        float cos_i = max(-dot(ghost_dir, hit_n), 0.0f);
+                        float fresnel = f0 + (1.0 - f0) * pow(1.0 - cos_i, 5.0);
+
+                        // Check if reflected direction points at any emissive sphere
+                        for (int ei = 0; ei < scene.num_spheres; ei++) {
+                            if (scene.spheres[ei].emission < 1.0) continue;
+                            float3 ec = float3(scene.spheres[ei].cx,
+                                               scene.spheres[ei].cy,
+                                               scene.spheres[ei].cz);
+                            float er = scene.spheres[ei].radius;
+                            float3 to_emissive = ec - hit_pt;
+                            float edist = length(to_emissive);
+                            to_emissive /= edist;
+                            float alignment = dot(refl, to_emissive);
+                            // Angular radius of emissive sphere as seen from hit point
+                            float ang_radius = er / edist;
+                            if (alignment > (1.0 - ang_radius * ang_radius * 0.5)) {
+                                float3 gc = float3(scene.spheres[ei].color_r,
+                                                   scene.spheres[ei].color_g,
+                                                   scene.spheres[ei].color_b);
+                                gc *= scene.spheres[ei].emission * gw * fresnel;
+                                gc *= wavelength_to_rgb(wavelength, spec_norm);
+                                ghost_R += gc.r;
+                                ghost_G += gc.g;
+                                ghost_B += gc.b;
+                            }
                         }
                     }
                 }
