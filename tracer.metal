@@ -1254,7 +1254,7 @@ kernel void ghost_kernel(
     // ghost_boost compensates for physically perfect AR coatings that 
     // suppress ghost reflections more than desired artistically
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 10.0;
+    float ghost_boost = 20.0;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;

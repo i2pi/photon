@@ -34,7 +34,7 @@ light pos=0,8,5 intensity=3.0
 # Fill lights (cooler, from sides)
 light pos=8,-3,3 intensity=1.5
 light pos=-8,-3,3 intensity=1.5
-# Specular-only lights for bright glints
-light pos=5,-4,3 intensity=15.0 specular=300.0 diffuse=0.0
-light pos=-4,5,3 intensity=12.0 specular=250.0 diffuse=0.0
+# Specular-only lights for bright glints that drive ghost streaks
+light pos=5,-4,3 intensity=15.0 specular=500.0 diffuse=0.0
+light pos=-4,5,3 intensity=12.0 specular=400.0 diffuse=0.0
 
