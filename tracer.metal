@@ -1176,8 +1176,11 @@ kernel void ghost_kernel(
                             float3 to_light = normalize(lp - hit_pt);
                             float refl_cos = dot(refl_ghost, to_light);
 
-                            // Use phong for cone size
-                            float glint_size = 1.0 / scene.spheres[si].phong;
+                            // Ghost image is aberrated — use wider cone than main render
+                            // The ghost path through multiple lens reflections introduces
+                            // significant angular spread, so the effective glint size is larger
+                            float ghost_phong = min(scene.spheres[si].phong, 200.0f);
+                            float glint_size = 1.0 / ghost_phong;
                             if (refl_cos > (1.0 - glint_size)) {
                                 float t_val = (refl_cos - (1.0 - glint_size)) / glint_size;
                                 float cos_i = max(dot(hit_n, to_light), 0.0f);
