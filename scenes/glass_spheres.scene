@@ -4,7 +4,7 @@
 render width=512 height=512 min_samples=512 max_samples=4000 qual_thresh=0.008 trace_depth=32 shadow_rays=0 ghost_rays=1 exposure=0.22 contrast=1.25
 
 camera z=0.60 d=0.455
-aperture z=-0.026 radius=0.0095
+aperture z=-0.026 radius=0.011
 
 # Front anamorphic cylinder: dominant flare source, dispersive
 lens z=0.000  r1=-0.85  r2=1.00  radius=0.18 cauchy_a=1.06 cauchy_b=0.018 reflectance=0.30 anamorphic=90
