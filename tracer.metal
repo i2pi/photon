@@ -1208,9 +1208,11 @@ kernel void ghost_kernel(
             if (eff_total < 0.0001) continue;
 
             float3 wl_color = wavelength_to_rgb(wavelength, spec_norm);
-            // Streak intensity
+            // Streak intensity — blue wavelengths scatter more from the anamorphic element
             float ghost_strength = 0.04;
-            float3 contrib = src_lum * ghost_strength * eff_total * wl_color;
+            // Shorter wavelengths (blue) get stronger streak contribution
+            float wl_boost = 1.0 + max(0.0, (550.0 - wavelength) / 200.0);
+            float3 contrib = src_lum * ghost_strength * eff_total * wl_color * wl_boost;
 
             ghost_R += contrib.r;
             ghost_G += contrib.g;
