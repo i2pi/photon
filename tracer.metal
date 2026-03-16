@@ -1090,12 +1090,14 @@ kernel void ghost_kernel(
 
     float3 spec_norm = float3(scene.spec_norm_r, scene.spec_norm_g, scene.spec_norm_b);
 
-    // Compute effective pupil radius (same as trace_kernel DOF sampling)
+    // Ghost pupil: use a LARGER pupil than the beauty aperture to get
+    // long anamorphic streaks. The flare extent is proportional to pupil size.
+    // Use the front lens element radius (not the small beauty aperture).
     float dof_radius = scene.camera.lenses[0].radius;
     for (int le = 1; le < scene.camera.num_lenses; le++)
         dof_radius = min(dof_radius, scene.camera.lenses[le].radius);
-    if (scene.camera.aperture_radius > 0)
-        dof_radius = min(dof_radius, scene.camera.aperture_radius);
+    // Clamp to a reasonable flare pupil size (don't use tiny beauty aperture)
+    float ghost_pupil = min(dof_radius, 0.04f);
 
     // Per-pixel RNG for Cranley-Patterson rotation offsets
     RNG pixel_rng(scene.frame_seed ^ pixel_idx * 1973u ^ uint(x) * 9277u ^ uint(y) * 6581u);
@@ -1120,7 +1122,7 @@ kernel void ghost_kernel(
 
         // Sample entrance pupil point (same stratification as trace_kernel)
         float angle = 2.0 * M_PI_F * fract(float(i) * 0.7548776662 + pixel_rand_a);
-        float rad = dof_radius * sqrt(fract(float(i) * 0.3247179572 + pixel_rand_r));
+        float rad = ghost_pupil * sqrt(fract(float(i) * 0.3247179572 + pixel_rand_r));
         float3 lens_point = float3(rad * cos(angle), rad * sin(angle), front_z);
 
         float3 ghost_ray_dir = normalize(lens_point - sensor_origin);
@@ -1158,13 +1160,13 @@ kernel void ghost_kernel(
                     float3 to_light = normalize(lp - ghost_origin);
                     float cos_angle = dot(ghost_dir, to_light);
 
-                    // Accept if ghost ray points roughly toward the light
-                    // Use a moderate cone for the "virtual light source" size
-                    if (cos_angle > 0.95) {
+                    // Accept if ghost ray points closely toward the light
+                    // Tight cone prevents blobs, preserves streak shape
+                    if (cos_angle > 0.995) {
                         float light_dist = length(lp - ghost_origin);
                         float atten = 1.0 / (1.0 + light_dist * 0.01);
                         // Smooth falloff within the acceptance cone
-                        float t = (cos_angle - 0.95) / 0.05;
+                        float t = (cos_angle - 0.995) / 0.005;
                         float intensity = t * t * spec_mult * atten;
                         ghost_contrib += intensity * lc;
                         debug_glint_hits += 1.0;
@@ -1240,7 +1242,7 @@ kernel void ghost_kernel(
     // Normalize: average over GHOST_SAMPLES (Monte Carlo estimator)
     // Sum over ghost pairs is the physical total ghost contribution
     float ginv = 1.0 / float(GHOST_SAMPLES);
-    float ghost_boost = 0.5;
+    float ghost_boost = 0.005;
 
     int gidx = pixel_idx * 3;
     ghost_buf[gidx + 0] = debug_emissive_hits + debug_glint_hits * 0.001;
