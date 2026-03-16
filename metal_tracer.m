@@ -567,6 +567,17 @@ void gpu_ray_trace_to_pixels(sceneT *scene, int width, int height,
             pixels_f[i] = gpu_output[i];
         }
 
+        // Diagnostic: check raw linear background values
+        {
+            int diag_pts[][2] = {{10,10},{50,10},{10,50},{256,10},{10,256}};
+            for (int d = 0; d < 5; d++) {
+                int dx = diag_pts[d][0], dy = diag_pts[d][1];
+                int di = (dy * width + dx) * 3;
+                fprintf(stderr, "  raw bg (%d,%d): r=%.4f g=%.4f b=%.4f\n",
+                        dx, dy, gpu_output[di], gpu_output[di+1], gpu_output[di+2]);
+            }
+        }
+
         for (int i = 0; i < width * height; i++) {
             int idx = i * 3;
             float r = gpu_output[idx + 0];

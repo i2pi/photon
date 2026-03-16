@@ -505,8 +505,9 @@ bool ray_through_lens_system(float3 ray_origin, float3 ray_dir,
             return false;
         }
 
-        if (cam.lenses[nearest_elem].cauchy_b > 0.005)
-            hit_dispersive = true;
+        // Don't set hit_dispersive for lens elements — lens dispersion
+        // is handled by per-wavelength ray tracing already. Setting it here
+        // would cause background/emissive pixels to get noisy spectral weighting.
 
         // Determine entering/exiting by current medium, not geometry
         // If we're in air (ri≈1), we must be entering glass; if in glass, exiting to air
@@ -857,7 +858,7 @@ float3 trace_ray(float3 origin, float3 direction,
             if (dot(op, rough_normal) < 0) {
                 // Outside surface
                 float surf_ri = cauchy_ri(surf.cauchy_a, surf.cauchy_b, wavelength);
-                if (surf.cauchy_b > 0.005) hit_dispersive = true;
+                if (surf.cauchy_b > 0.015) hit_dispersive = true;
                 float eta = ray_ri / surf_ri;
                 refracted = refract(ray_dir, rough_normal, eta);
                 if (length(refracted) > 0.001) {
@@ -1012,7 +1013,7 @@ kernel void trace_kernel(
 
         // Soft firefly clamp: smoothly compress bright outliers
         float lum_check = color.r + color.g + color.b;
-        float clamp_knee = 12.0;
+        float clamp_knee = 6.0;
         if (lum_check > clamp_knee) {
             float excess = lum_check - clamp_knee;
             float compressed = clamp_knee + clamp_knee * excess / (clamp_knee + excess);
@@ -1334,7 +1335,7 @@ kernel void flare_kernel(
     // Source weight: solid angle of the lens aperture as seen from glint
     float glint_dist = length(lens_point - glint_pos);
     float cos_theta = max(abs(ray_dir.z), 0.1f);
-    float flare_boost = 200000.0;
+    float flare_boost = 80000.0;
     float source_weight = spec_mult * cos_theta * M_PI_F * lens_radius * lens_radius
                           * flare_boost / (glint_dist * glint_dist * float(samples_per_light));
 
@@ -1455,16 +1456,16 @@ kernel void flare_kernel(
             // Perpendicular to axis = direction of curvature = wider scatter
             float2 perp = float2(-axis.y, axis.x);
 
-            // Anisotropic scatter: moderate along perpendicular (horizontal), narrow along axis
-            float scatter_perp = 0.05;  // spread perpendicular to cylinder axis
+            // Anisotropic scatter: wide along perpendicular (horizontal), narrow along axis
+            float scatter_perp = 0.12;  // spread perpendicular to cylinder axis
             float scatter_axis = 0.001;  // extremely narrow along cylinder axis
 
             // Generate scatter in the cylinder's local frame
             float u1 = rng.uniform() * 2.0 - 1.0;  // uniform [-1,1]
             float u2 = rng.uniform() * 2.0 - 1.0;
-            // Cauchy distribution with clamp for controlled tails
-            float scatter_x = clamp(scatter_perp * tan(u1 * M_PI_F * 0.49f), -0.15f, 0.15f);
-            float scatter_y = scatter_axis * (u2 * u2 * u2);  // narrow
+            // Cauchy distribution with clamp for fat tails (smooth 1/(1+x^2) falloff)
+            float scatter_x = clamp(scatter_perp * tan(u1 * M_PI_F * 0.48f), -0.5f, 0.5f);
+            float scatter_y = scatter_axis * u2;
 
             // Convert to world X-Y perturbation
             float dx = perp.x * scatter_x + axis.x * scatter_y;
