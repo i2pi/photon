@@ -1180,10 +1180,10 @@ kernel void ghost_kernel(
         float perp_weight = exp(-0.5 * (perp_streak * perp_streak) / (perp_sigma * perp_sigma));
         float along_dist = abs(along_streak);
 
-        if (perp_weight < 0.01 || along_dist < 1.0) continue;  // skip center (already rendered) and negligible
+        if (perp_weight < 0.001 || along_dist < 0.5) continue;  // skip center (already rendered) and negligible
 
         // Along-streak falloff: 1/distance for long tail
-        float along_weight = along_scale / (along_dist * along_dist + along_scale);
+        float along_weight = along_scale / (along_dist + along_scale);
 
         float total_weight = perp_weight * along_weight;
         if (total_weight < 0.0001) continue;
@@ -1202,14 +1202,14 @@ kernel void ghost_kernel(
             // Effective along-streak position for this wavelength
             float effective_along = along_streak - chromatic_offset;
             float eff_dist = abs(effective_along);
-            float eff_along_weight = along_scale / (eff_dist * eff_dist + along_scale);
+            float eff_along_weight = along_scale / (eff_dist + along_scale);
             float eff_total = perp_weight * eff_along_weight;
 
             if (eff_total < 0.0001) continue;
 
             float3 wl_color = wavelength_to_rgb(wavelength, spec_norm);
             // Streak intensity
-            float ghost_strength = 0.5;
+            float ghost_strength = 0.02;
             float3 contrib = src_lum * ghost_strength * eff_total * wl_color;
 
             ghost_R += contrib.r;
